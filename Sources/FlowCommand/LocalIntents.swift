@@ -8,6 +8,8 @@ enum LocalIntent: Equatable {
     case keys(String, label: String)
     case type(String)
     case scroll(String)
+    /// Click a button or link on the current web page by its visible text (instant in Chrome).
+    case click(String)
 
     var label: String {
         switch self {
@@ -17,6 +19,7 @@ enum LocalIntent: Equatable {
         case .keys(_, let l): return l
         case .type(let t): return "Typing “\(t.prefix(40))\(t.count > 40 ? "…" : "")”"
         case .scroll(let d): return "Scrolling \(d)"
+        case .click(let t): return "Clicking “\(t)”"
         }
     }
 }
@@ -177,7 +180,13 @@ enum LocalIntents {
             if target.hasPrefix("the ") { target = String(target.dropFirst(4)) }
             if looksLikeDomain(target) { return .openURL(target) }
             if let site = sites[target] { return .openURL(site) }
-            return nil
+            // "click sign up", "click on the Contacts tab" → click by visible text on the page
+            if target.contains(" and ") || target.contains(" then ") { return nil }
+            for suffix in [" button", " link", " tab", " option"] where target.hasSuffix(suffix) && target.count > suffix.count + 1 {
+                target = String(target.dropLast(suffix.count))
+            }
+            guard !target.isEmpty, target.split(separator: " ").count <= 6 else { return nil }
+            return .click(target)
         }
 
         for prefix in ["search google for ", "google search ", "search for ", "google "] where t.hasPrefix(prefix) {

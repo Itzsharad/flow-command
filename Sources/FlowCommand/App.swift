@@ -111,6 +111,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         listener.start()
         if Permissions.control { keys.start() }
+        Transcriber.shared.prepare()   // downloads the accent-accurate speech model once, in the background
     }
 
     func showOnboarding() {

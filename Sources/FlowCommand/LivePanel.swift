@@ -37,7 +37,7 @@ final class LivePanelController {
     private func refresh() {
         guard let p = panel, let host = host else { return }
         let agent = Agent.shared, mode = Listener.shared.mode
-        let show = agent.phase != .idle || mode == .awake || mode == .holding
+        let show = agent.phase != .idle || mode == .awake || mode == .holding || Listener.shared.understanding
         guard show else { p.orderOut(nil); return }
         let size = host.fittingSize
         let screen = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
@@ -84,8 +84,9 @@ struct LivePanelView: View {
     private var listening: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 10) {
-                dot(Theme.danger)
-                Text(listener.mode == .holding ? "Listening — let go when you're done" : "Listening — what should I do?")
+                dot(listener.understanding ? Theme.violetLight : Theme.danger)
+                Text(listener.understanding ? "Understanding…"
+                     : listener.mode == .holding ? "Listening — let go when you're done" : "Listening — what should I do?")
                     .font(.system(size: 15, weight: .semibold))
             }
             Waveform(level: listener.level)

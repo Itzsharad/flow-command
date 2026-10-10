@@ -84,6 +84,19 @@ struct GeminiClient {
         throw GeminiError.badReply
     }
 
+    /// Text-only turn for driving a web page from its element list (no screenshot, ~1 second).
+    func nextPageAction(system: String, text: String) async throws -> [String: Any] {
+        for attempt in 0..<2 {
+            let obj = try await request([
+                "model": model, "temperature": 0.1, "max_tokens": 1000,
+                "messages": [["role": "system", "content": system],
+                             ["role": "user", "content": text + (attempt == 0 ? "" : "\n\nIMPORTANT: reply with ONLY one JSON object.")]],
+            ], timeout: 30)
+            if let t = GeminiClient.replyText(obj), let action = GeminiClient.parseAction(t) { return action }
+        }
+        throw GeminiError.badReply
+    }
+
     /// Fast path (~1 second, text only, no screenshot): turn a spoken instruction into simple steps
     /// the Mac can run instantly. Returns nil steps when the task truly needs to look at the screen.
     func plan(_ instruction: String) async throws -> [[String: Any]]? {
@@ -96,8 +109,10 @@ struct GeminiClient {
         - {"action":"keys","keys":"cmd+t"}                  (macOS shortcuts: cmd+t new tab, cmd+n new window, cmd+w close tab, cmd+l address bar, cmd+r reload, Return)
         - {"action":"type","text":"…"}                      (types into whatever is focused)
         - {"action":"search","query":"…"}                    (Google search)
+        - {"action":"click","text":"Sign up"}               (clicks a button or link on the current WEB PAGE by its exact visible text)
         Reply with ONLY JSON: {"needs_screen": false, "steps": [ … ]}
-        If doing it needs to see the screen (clicking a specific button or item, reading or choosing something visible, filling a form, switching accounts), reply {"needs_screen": true, "steps": []}.
+        Use click only when you're confident of the button's text (like "Sign up", "Log in", "New chat", "Compose").
+        If doing it needs to read or choose something on the page (picking an item, filling a form, switching accounts), or needs clicks outside a web page, reply {"needs_screen": true, "steps": []}.
         """
         let obj = try await request([
             "model": model, "temperature": 0, "max_tokens": 500,
@@ -132,6 +147,9 @@ struct GeminiClient {
             case "search":
                 guard let q = st["query"] as? String, !q.isEmpty else { return nil }
                 out.append(.search(q))
+            case "click":
+                guard let t = st["text"] as? String, !t.isEmpty else { return nil }
+                out.append(.click(t))
             default:
                 return nil
             }

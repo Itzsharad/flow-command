@@ -54,6 +54,10 @@ final class Listener: ObservableObject {
     private var started = false
     /// Falls back to Apple's online recognition when on-device speech isn't installed (no Dictation setup needed).
     private var useServer = false
+    /// Where the current instruction's audio starts (for Whisper), and whether it begins with the wake phrase.
+    private var audioMark = 0
+    private var audioHasWakePhrase = false
+    @Published private(set) var understanding = false
 
     var pending: String { (carry + " " + current).trimmingCharacters(in: .whitespacesAndNewlines) }
 
@@ -106,6 +110,8 @@ final class Listener: ObservableObject {
         guard started else { return }
         if !engineRunning { startEngine() }
         carry = ""; live = ""
+        audioMark = Transcriber.shared.mark(secondsBack: 0.3)
+        audioHasWakePhrase = false
         mode = .awake
         lastActivity = Date()
         box.wantsLevel = true
@@ -132,6 +138,8 @@ final class Listener: ObservableObject {
         guard started, mode != .holding else { return }
         if !engineRunning { startEngine() }
         carry = ""; live = ""
+        audioMark = Transcriber.shared.mark(secondsBack: 0.3)
+        audioHasWakePhrase = false
         mode = .holding
         lastActivity = Date()
         box.wantsLevel = true
@@ -161,8 +169,10 @@ final class Listener: ObservableObject {
         }
         input.removeTap(onBus: 0)
         let box = self.box
+        let whisper = Transcriber.shared
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
             box.append(buffer)
+            whisper.feed(buffer)
             guard box.wantsLevel, let data = buffer.floatChannelData?[0] else { return }
             let n = Int(buffer.frameLength)
             guard n > 0 else { return }
@@ -246,6 +256,11 @@ final class Listener: ObservableObject {
             if let rest = WakeMatcher.match(text, phrase: settings.wakePhrase) {
                 let carried = rest.joined(separator: " ")
                 wakeNow()
+                if !carried.isEmpty {
+                    // The instruction started in the same breath as the wake phrase — include that audio.
+                    audioMark = Transcriber.shared.mark(secondsBack: min(8, Date().timeIntervalSince(taskStarted)))
+                    audioHasWakePhrase = true
+                }
                 carry = carried
                 live = carried
                 lastChange = Date()
@@ -286,16 +301,54 @@ final class Listener: ObservableObject {
 
     private func submit() {
         let p = pending
+        let whisper = Transcriber.shared
+        let audio = whisper.isReady ? whisper.samples(from: audioMark) : []
+        let hadWake = audioHasWakePhrase
+        audioMark = whisper.mark()
+        audioHasWakePhrase = false
         carry = ""; live = ""
         restartRecognition()
-        guard !p.isEmpty else { return }
+        guard !p.isEmpty || audio.count > 16_000 else { return }
         lastActivity = Date()
-        if let intercept = replyInterceptor, intercept(p) { return }
-        if isBusy() {
-            if WakeMatcher.isStop(p) { onStopWord?() }
+        // Quick replies (yes / no / stop / sleep) use the instant text.
+        if !p.isEmpty {
+            if let intercept = replyInterceptor, intercept(p) { return }
+            if isBusy() {
+                if WakeMatcher.isStop(p) { onStopWord?() }
+                return
+            }
+            if WakeMatcher.isSleep(p) { sleep(); return }
+        } else if isBusy() || replyInterceptor != nil {
             return
         }
-        if WakeMatcher.isSleep(p) { sleep(); return }
-        onInstruction?(p)
+        guard !audio.isEmpty else { onInstruction?(p); return }
+        // The instruction itself: Whisper's more accurate text (falls back to the instant text).
+        understanding = true
+        live = p
+        let phrase = settings.wakePhrase
+        Task {
+            var text = await whisper.transcribe(audio)
+            if let t = text, hadWake { text = Listener.dropWakePhrase(t, phrase: phrase) }
+            await MainActor.run {
+                self.understanding = false
+                self.live = ""
+                let final = (text?.isEmpty == false ? text! : p)
+                guard !final.isEmpty else { return }
+                self.onInstruction?(final)
+            }
+        }
+    }
+
+    /// "Flow Command, activate. Open Chrome" → "Open Chrome" (keeps the original casing).
+    static func dropWakePhrase(_ text: String, phrase: String) -> String {
+        guard let rest = WakeMatcher.match(text, phrase: phrase) else { return text }
+        guard !rest.isEmpty else { return "" }
+        // Find where the remaining words start in the original text.
+        let tokens = text.split(whereSeparator: { $0 == " " }).map(String.init)
+        let skipWords = WakeMatcher.words(text).count - rest.count
+        var i = 0
+        while i < tokens.count, WakeMatcher.words(tokens[0..<i].joined(separator: " ")).count < skipWords { i += 1 }
+        let keep = tokens[i...].joined(separator: " ")
+        return keep.trimmingCharacters(in: CharacterSet(charactersIn: " ,.!?"))
     }
 }

@@ -99,6 +99,38 @@ enum SelfTest {
         check(imageCount == 3, "keeps newest 3 screenshots")
         check(JSONSerialization.isValidJSONObject(["tools": [ClaudeClient.computerToolset] + ClaudeClient.customTools]), "tools are valid JSON")
 
+        // Click by text on web pages
+        check(LocalIntents.parse("click sign up", appExists: exists) == .click("sign up"), "click by text")
+        check(LocalIntents.parse("click on the Contacts tab", appExists: exists) == .click("contacts"), "click strips 'the' and 'tab'")
+        check(LocalIntents.parse("click sign up and type hello", appExists: exists) == nil, "click with 'and' isn't one step")
+        check(LocalIntents.parseChain("go to github.com and click sign up", appExists: exists) ==
+              [.openURL("github.com"), .click("sign up")], "open then click")
+        check(GeminiClient.localIntents(from: [["action": "click", "text": "New chat"]]) == [.click("New chat")], "planner click")
+        let els = [
+            Browser.Element(id: 0, kind: "a", text: "Sign in", value: "", inView: true),
+            Browser.Element(id: 1, kind: "a", text: "Sign up for GitHub", value: "", inView: false),
+            Browser.Element(id: 2, kind: "button", text: "Sign up", value: "", inView: true),
+            Browser.Element(id: 3, kind: "input:email", text: "Email address", value: "", inView: true),
+        ]
+        check(Browser.bestMatch("sign up", in: els)?.id == 2, "best match exact")
+        check(Browser.bestMatch("email", in: els)?.id == 3, "best match field")
+        check(Browser.bestMatch("checkout", in: els) == nil, "no match")
+        check(Browser.appleScriptString("say \"hi\" \\n") == "\"say \\\"hi\\\" \\\\n\"", "applescript escaping")
+        check(Browser.describe(Browser.Page(title: "T", url: "u", elements: [els[2]])).contains("[2] button \"Sign up\""), "page outline text")
+
+        // Routines
+        let routines = [Routine(phrase: "morning setup", steps: "open gmail"), Routine(phrase: "new chat", steps: "open claude.ai")]
+        check(Routine.match("morning setup", in: routines)?.phrase == "morning setup", "routine exact")
+        check(Routine.match("run my morning set up routine", in: routines)?.phrase == "morning setup", "routine fuzzy")
+        check(Routine.match("open morning news", in: routines) == nil, "routine no false match")
+
+        // Whisper text clean-up
+        check(Transcriber.tidy(" Open Chrome and go to claude.ai.") == "Open Chrome and go to claude.ai", "whisper trailing period")
+        check(Transcriber.tidy("[BLANK_AUDIO]") == nil, "whisper blank")
+        check(Transcriber.tidy("Thank you.") == nil, "whisper silence phrase")
+        check(Listener.dropWakePhrase("Flow Command, activate. Open Chrome", phrase: "Flow Command, activate") == "Open Chrome", "drop wake phrase")
+        check(Listener.dropWakePhrase("Open Chrome", phrase: "Flow Command, activate") == "Open Chrome", "no wake phrase to drop")
+
         // Hotkey settings round-trip
         let spec = HotKeySpec(kind: .key, keyCode: 96, modifiers: 0, label: "F5")
         let back = try? JSONDecoder().decode(HotKeySpec.self, from: JSONEncoder().encode(spec))

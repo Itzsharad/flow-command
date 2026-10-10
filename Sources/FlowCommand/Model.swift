@@ -100,6 +100,10 @@ final class AppSettings: ObservableObject {
     @Published var geminiModel: String { didSet { d.set(geminiModel, forKey: "geminiModel") } }
     /// App name used for websites ("" = system default browser)
     @Published var browser: String { didSet { d.set(browser, forKey: "browser") } }
+    /// Whisper (accent-accurate, on this Mac) understands instructions; Apple's recogniser only listens for the wake phrase.
+    @Published var whisperEnabled: Bool { didSet { d.set(whisperEnabled, forKey: "whisperEnabled") } }
+    /// Saved voice shortcuts: say the phrase, the steps run.
+    @Published var routines: [Routine] { didSet { save(routines, "routines") } }
     @Published var hasAPIKey: Bool = false
     @Published var hasGeminiKey: Bool = false
 
@@ -111,6 +115,7 @@ final class AppSettings: ObservableObject {
             "askBeforeDelete": true, "askBeforePost": true, "sounds": true,
             "model": "claude-sonnet-5-5", "brain": "gemini", "geminiModel": "gemini-3.8-flash",
             "browser": Computer.findApp(named: "google chrome") != nil ? "Google Chrome" : "",
+            "whisperEnabled": true,
         ])
         onboarded = d.bool(forKey: "onboarded")
         onboardingStep = d.integer(forKey: "setupStep")
@@ -133,6 +138,12 @@ final class AppSettings: ObservableObject {
         brain = d.string(forKey: "brain") ?? "gemini"
         geminiModel = d.string(forKey: "geminiModel") ?? "gemini-3.8-flash"
         browser = d.string(forKey: "browser") ?? ""
+        whisperEnabled = d.bool(forKey: "whisperEnabled")
+        if let data = d.data(forKey: "routines"), let list = try? JSONDecoder().decode([Routine].self, from: data) {
+            routines = list
+        } else {
+            routines = Routine.examples
+        }
         // Remember *whether* keys exist without reading the Keychain at every launch (which makes macOS ask).
         if d.object(forKey: "hasClaudeKey") == nil { d.set(!(Keychain.get("anthropic") ?? "").isEmpty, forKey: "hasClaudeKey") }
         if d.object(forKey: "hasGeminiKeyFlag") == nil { d.set(!(Keychain.get("gemini") ?? "").isEmpty, forKey: "hasGeminiKeyFlag") }

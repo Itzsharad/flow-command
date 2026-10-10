@@ -3,7 +3,7 @@ import ServiceManagement
 import SwiftUI
 
 struct MainWindowView: View {
-    enum Tab: String { case history = "History", settings = "Settings" }
+    enum Tab: String { case history = "History", routines = "Routines", settings = "Settings" }
     @State var tab: Tab = .settings
     @ObservedObject var listener = Listener.shared
 
@@ -16,6 +16,7 @@ struct MainWindowView: View {
                     Text("Flow Command").font(.system(size: 16, weight: .semibold))
                 }.padding(.leading, 8).padding(.bottom, 18)
                 navItem(.history, "clock")
+                navItem(.routines, "bolt")
                 navItem(.settings, "slider.horizontal.3")
                 Spacer()
                 VStack(alignment: .leading, spacing: 8) {
@@ -37,7 +38,11 @@ struct MainWindowView: View {
 
             ScrollView {
                 Group {
-                    if tab == .history { HistoryView() } else { SettingsView() }
+                    switch tab {
+                    case .history: HistoryView()
+                    case .routines: RoutinesView()
+                    case .settings: SettingsView()
+                    }
                 }
                 .padding(EdgeInsets(top: 40, leading: 36, bottom: 36, trailing: 36))
                 .frame(maxWidth: 820, alignment: .leading)
@@ -106,6 +111,43 @@ struct HistoryView: View {
     }
 }
 
+struct RoutinesView: View {
+    @ObservedObject var settings = AppSettings.shared
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Routines").font(.system(size: 26, weight: .semibold))
+            Text("Say the phrase and all the steps run. Write steps the way you'd say them, separated by commas — for example “open Gmail, open my calendar, click Compose”.")
+                .font(.system(size: 14)).foregroundColor(Color(hex: 0x5E5E6A)).fixedSize(horizontal: false, vertical: true)
+            VStack(spacing: 0) {
+                ForEach($settings.routines) { $r in
+                    HStack(alignment: .top, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("When I say").font(.system(size: 12)).foregroundColor(Theme.faint)
+                            TextField("morning setup", text: $r.phrase).textFieldStyle(.roundedBorder).frame(width: 200)
+                        }
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Do this").font(.system(size: 12)).foregroundColor(Theme.faint)
+                            TextField("open Gmail, open my calendar", text: $r.steps).textFieldStyle(.roundedBorder)
+                        }
+                        Button {
+                            settings.routines.removeAll { $0.id == r.id }
+                        } label: { Image(systemName: "trash") }
+                            .buttonStyle(.plain).foregroundColor(Theme.muted).padding(.top, 26)
+                            .help("Delete this routine")
+                    }
+                    .padding(.horizontal, 18).padding(.vertical, 14)
+                    Divider()
+                }
+            }
+            .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.hairline))
+            Button("+ Add a routine") { settings.routines.append(Routine(phrase: "", steps: "")) }
+            Text("Tip: routines with simple steps run instantly and free. Steps like “click New chat” work instantly in Chrome once it's made instant in Settings › Websites.")
+                .font(.system(size: 13)).foregroundColor(Theme.muted).fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
 struct SettingsView: View {
     @ObservedObject var settings = AppSettings.shared
     @State private var recording = false
@@ -114,6 +156,9 @@ struct SettingsView: View {
     @State private var checking = false
     @State private var tick = 0
     @State private var loginOn = SMAppService.mainApp.status == .enabled
+    @ObservedObject private var whisper = Transcriber.shared
+    @State private var browserMessage: String?
+    @State private var settingUpBrowser = false
     private let timer = Timer.publish(every: 2, on: .main, in: .common).autoconnect()
 
     var body: some View {
@@ -149,6 +194,36 @@ struct SettingsView: View {
                 }
             }
 
+            section("Understanding your voice") {
+                row("Accent-accurate speech (Whisper, runs on your Mac)") {
+                    Toggle44(on: $settings.whisperEnabled)
+                }
+                if settings.whisperEnabled {
+                    HStack(spacing: 10) {
+                        switch whisper.state {
+                        case .ready:
+                            Image(systemName: "checkmark.circle.fill").foregroundColor(Theme.success)
+                            Text("Ready — understands Indian and other accents, offline").font(.system(size: 13))
+                        case .downloading(let f):
+                            ProgressView(value: f).frame(width: 160)
+                            Text("Downloading the speech model (\(Transcriber.sizeLabel)) — \(Int(f * 100))%").font(.system(size: 13))
+                        case .preparing:
+                            ProgressView().controlSize(.small)
+                            Text("Getting it ready — the first time takes a minute or two").font(.system(size: 13))
+                        case .failed(let m):
+                            Image(systemName: "exclamationmark.circle.fill").foregroundColor(Theme.warn)
+                            Text("Couldn't set it up: \(m)").font(.system(size: 13)).lineLimit(2)
+                            Button("Try again") { Transcriber.shared.prepare() }
+                        case .notInstalled, .off:
+                            Text("Needs a one-time download (\(Transcriber.sizeLabel)).").font(.system(size: 13))
+                            Button("Download") { Transcriber.shared.prepare() }
+                        }
+                    }
+                    Text("Until it's ready, Apple's built-in recognition is used. The wake phrase always uses Apple's, so it reacts instantly.")
+                        .font(.system(size: 12)).foregroundColor(Theme.faint).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
             section("Safety — always check with me before it…") {
                 row("Sends a message or email") { Toggle44(on: $settings.askBeforeSend) }
                 row("Buys something or makes a payment") { Toggle44(on: $settings.askBeforePay) }
@@ -170,6 +245,28 @@ struct SettingsView: View {
                     }.labelsHidden().frame(width: 220)
                 }
                 Text("“Open Claude” opens claude.ai here. Say “open Claude app” for the desktop app.").font(.system(size: 13)).foregroundColor(Theme.muted)
+                if Browser.chromium[settings.browser] != nil {
+                    let _ = tick
+                    HStack(spacing: 10) {
+                        Image(systemName: Browser.ready ? "bolt.circle.fill" : "bolt.circle").foregroundColor(Browser.ready ? Theme.success : Theme.warn)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(Browser.ready ? "Instant clicking is on" : "Make \(settings.browser) instant").font(.system(size: 14, weight: .semibold))
+                            Text("Clicks buttons and fills forms directly — no screenshots, about 10× faster.").font(.system(size: 12)).foregroundColor(Theme.muted)
+                        }
+                        Spacer()
+                        if !Browser.ready {
+                            Button(settingUpBrowser ? "Turning on…" : "Turn on") {
+                                settingUpBrowser = true
+                                Task { @MainActor in
+                                    browserMessage = await Browser.setUp(settings.browser)
+                                    settingUpBrowser = false
+                                    tick += 1
+                                }
+                            }.disabled(settingUpBrowser)
+                        }
+                    }
+                    if let m = browserMessage { Text(m).font(.system(size: 12)).foregroundColor(Theme.warn).fixedSize(horizontal: false, vertical: true) }
+                }
             }
 
             section("AI brain — for bigger tasks") {
@@ -242,6 +339,7 @@ struct SettingsView: View {
         .onReceive(timer) { _ in tick += 1 }
         .onChange(of: settings.wakeEnabled) { _ in Listener.shared.reconfigure() }
         .onChange(of: settings.holdKeyEnabled) { _ in Listener.shared.reconfigure() }
+        .onChange(of: settings.whisperEnabled) { on in if on { Transcriber.shared.prepare() } }
     }
 
     static let browsers = ["Google Chrome", "Safari", "Arc", "Brave Browser", "Microsoft Edge", "Firefox", ""]

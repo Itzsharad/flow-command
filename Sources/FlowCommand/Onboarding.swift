@@ -82,6 +82,9 @@ struct OnboardingView: View {
     @State private var tick = 0
     @State private var recording = false
     @State private var startAtLogin = true
+    @ObservedObject private var whisper = Transcriber.shared
+    @State private var browserMessage: String?
+    @State private var settingUpBrowser = false
 
     private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     static let railLabels = ["Microphone", "Click & type", "How to wake it"]
@@ -318,7 +321,8 @@ struct OnboardingView: View {
                 tip("Instant & free", "“Open Chrome, go to claude.ai, type hello and press enter”")
                 tip("Bigger tasks", "Add the free AI brain in Settings when you want it")
                 tip("Stop anytime", "Say “stop” or press Esc")
-            }.frame(maxWidth: 600).padding(.bottom, 20)
+            }.frame(maxWidth: 600).padding(.bottom, 16)
+            boosts.frame(maxWidth: 600).padding(.bottom, 16)
             Toggle("Open Flow Command when I start my Mac", isOn: $startAtLogin).toggleStyle(.checkbox).font(.system(size: 15))
             Spacer()
             PrimaryButton(title: "Done") {
@@ -328,6 +332,60 @@ struct OnboardingView: View {
             }.padding(.bottom, 32)
         }
         .frame(maxWidth: .infinity)
+    }
+
+    /// Two optional speed-ups, shown on the last screen.
+    private var boosts: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                Image(systemName: "waveform.badge.mic").foregroundColor(Theme.accentInk).frame(width: 22)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Accent-accurate speech").font(.system(size: 14, weight: .semibold))
+                    Text(whisperText).font(.system(size: 12)).foregroundColor(Theme.muted)
+                }
+                Spacer()
+                if case .downloading(let f) = whisper.state { ProgressView(value: f).frame(width: 90) }
+                if whisper.state == .ready { Image(systemName: "checkmark.circle.fill").foregroundColor(Theme.success) }
+            }
+            if let b = settings.preferredBrowser, Browser.chromium[b] != nil {
+                let _ = tick
+                HStack(spacing: 10) {
+                    Image(systemName: "bolt.fill").foregroundColor(Theme.accentInk).frame(width: 22)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Make \(b) instant").font(.system(size: 14, weight: .semibold))
+                        Text(browserMessage ?? "Clicks buttons directly instead of looking at screenshots — about 10× faster.")
+                            .font(.system(size: 12)).foregroundColor(browserMessage == nil ? Theme.muted : Theme.warn)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer()
+                    if Browser.ready {
+                        Image(systemName: "checkmark.circle.fill").foregroundColor(Theme.success)
+                    } else {
+                        Button(settingUpBrowser ? "Turning on…" : "Turn on") {
+                            settingUpBrowser = true
+                            Task { @MainActor in
+                                browserMessage = await Browser.setUp(b)
+                                settingUpBrowser = false
+                                NSApp.activate(ignoringOtherApps: true)
+                            }
+                        }.disabled(settingUpBrowser)
+                    }
+                }
+            }
+        }
+        .padding(14)
+        .background(RoundedRectangle(cornerRadius: 14).fill(Color(hex: 0xFAFAFC)))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.hairline))
+    }
+
+    private var whisperText: String {
+        switch whisper.state {
+        case .ready: return "Ready — runs on your Mac, works offline"
+        case .downloading(let f): return "Downloading in the background (\(Transcriber.sizeLabel)) — \(Int(f * 100))%. You can use Flow Command meanwhile."
+        case .preparing: return "Almost ready — getting the model set up"
+        case .failed(let m): return "Will retry later (\(m))"
+        case .notInstalled, .off: return "Downloads in the background (\(Transcriber.sizeLabel)) once setup finishes"
+        }
     }
 
     private func tip(_ title: String, _ body: String) -> some View {
