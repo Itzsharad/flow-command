@@ -96,6 +96,11 @@ struct OnboardingView: View {
                     rail
                     VStack(alignment: .leading, spacing: 0) {
                         Text("Step \(step) of 6").font(.system(size: 13, weight: .semibold)).foregroundColor(Theme.accentInk).padding(.bottom, 14)
+                        if AppDelegate.runningFromInstaller {
+                            Text("You're running Flow Command from the installer disk. Quit it, drag it into Applications, eject the installer and open it from Applications — otherwise macOS permissions won't stick.")
+                                .font(.system(size: 13, weight: .medium)).foregroundColor(Theme.danger)
+                                .fixedSize(horizontal: false, vertical: true).padding(.bottom, 12)
+                        }
                         content
                         Spacer(minLength: 12)
                         footer
@@ -236,6 +241,10 @@ struct OnboardingView: View {
             .padding(16).frame(maxWidth: 470).background(RoundedRectangle(cornerRadius: 14).fill(Color(hex: 0xFAFAFC)))
             .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.hairline))
             StatusLine(ok: ok, okText: "Allowed", waitText: "Waiting — this screen moves on by itself once it's on.")
+            if !ok {
+                Text("Already on but still waiting? That switch may belong to an older copy. Select FlowCommand in the list, click –, then click Open System Settings again and turn on the new entry. Or click “Already on — reopen”.")
+                    .font(.system(size: 12)).foregroundColor(Theme.faint).fixedSize(horizontal: false, vertical: true).frame(maxWidth: 520, alignment: .leading)
+            }
         }
     }
 
@@ -417,7 +426,12 @@ struct OnboardingView: View {
             }
         case 3:
             if Permissions.control { PrimaryButton(title: "Continue") { step = 4 } }
-            else { PrimaryButton(title: "Open System Settings") { Permissions.requestControl() } }
+            else {
+                HStack(spacing: 10) {
+                    SecondaryButton(title: "Already on — reopen") { AppDelegate.relaunch() }
+                    PrimaryButton(title: "Open System Settings") { Permissions.requestControl(); Permissions.open(.accessibility) }
+                }
+            }
         case 4:
             PrimaryButton(title: "Continue", enabled: settings.wakeEnabled || settings.holdKeyEnabled) {
                 HotKeys.shared.cancelRecording(); recording = false; step = 5

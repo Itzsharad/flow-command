@@ -125,6 +125,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         w?.makeKeyAndOrderFront(nil)
     }
 
+    /// Running straight from the .dmg (or a quarantined copy) makes macOS permissions not stick.
+    static var runningFromInstaller: Bool {
+        let p = Bundle.main.bundlePath
+        return p.hasPrefix("/Volumes/") || p.contains("AppTranslocation")
+    }
+
     /// Some permissions only take effect after reopening. Reopens once, cleanly.
     static func relaunch() {
         let path = Bundle.main.bundlePath
