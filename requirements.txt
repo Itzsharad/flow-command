@@ -1,0 +1,10 @@
+faster-whisper>=1.0
+sounddevice
+numpy
+pyyaml
+rapidfuzz
+rumps
+pyobjc-framework-Cocoa
+pyobjc-framework-Quartz
+pyobjc-framework-ApplicationServices
+anthropic

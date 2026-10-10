@@ -1,0 +1,54 @@
+name: Build Mac app
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-14   # Apple Silicon (M1/M2/M3/M4)
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: pip install -r requirements.txt pyinstaller pillow
+
+      - name: Make app icon
+        run: |
+          python make_icon.py
+          iconutil -c icns icon.iconset -o icon.icns
+
+      - name: Build app
+        run: pyinstaller --noconfirm FlowCommand.spec
+
+      - name: Self-test the built app
+        run: dist/FlowCommand.app/Contents/MacOS/FlowCommand --selftest
+
+      - name: Make installer (.dmg)
+        run: |
+          mkdir dmg
+          cp -R dist/FlowCommand.app dmg/
+          ln -s /Applications dmg/Applications
+          hdiutil create -volname "Flow Command" -srcfolder dmg -ov -format UDZO FlowCommand.dmg
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FlowCommand-mac
+          path: FlowCommand.dmg
+
+      - name: Publish download
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest --yes --cleanup-tag || true
+          gh release create latest FlowCommand.dmg \
+            --title "Flow Command for Mac (latest)" \
+            --notes "Download **FlowCommand.dmg** below, open it, and drag Flow Command into Applications."

@@ -1,0 +1,161 @@
+# ─────────────────────────────────────────────────────────────
+#  Flow Command — your voice commands
+#  Hold Control + Option, speak, let go. The closest command runs.
+#  Save this file and changes apply instantly (no restart).
+#
+#  phrases:  what you might say. {text} captures the rest of what
+#            you said (e.g. "ask claude {text}").
+#  steps:    what happens, in order:
+#     open_url:  https://...      open in a NEW Chrome window
+#     new_tab:   https://...      open in a new tab
+#     launch:    "Notes"          open a Mac app by name
+#     hotkey:    ctrl+t           press a shortcut (ctrl = ⌘ Command)
+#     press:     enter            press one key
+#     paste:     "{text}"         paste text (fast + reliable)
+#     type:      "hello"          type text letter by letter
+#     wait:      1.5              pause, in seconds ("page" = page_load_wait)
+#
+#  Tip: indentation matters — copy an existing block and edit it.
+# ─────────────────────────────────────────────────────────────
+
+settings:
+  hotkey: control+option      # hold to talk. Modifier keys only: control, option, shift, command, fn
+  whisper_model: base.en      # tiny.en (fastest) / base.en / small.en (most accurate)
+  page_load_wait: 3.0         # seconds to wait for a website before pasting
+  min_match_score: 70         # 0–100. Lower = more forgiving matching
+  confirm_before_send: false  # true = it pastes your prompt but YOU press Enter
+  sounds: true                # little sounds when it starts / finishes
+  ai_fallback: true           # let Claude understand loosely-worded commands…
+  anthropic_api_key: ""       # …paste your key from console.anthropic.com here (optional)
+
+commands:
+
+  - name: Ask Claude
+    phrases:
+      - "ask claude {text}"
+      - "claude {text}"
+      - "new claude chat {text}"
+      - "open claude and type {text}"
+    steps:
+      - open_url: https://claude.ai/new
+      - wait: page
+      - paste: "{text}"
+      - press: enter
+
+  - name: New Claude chat (empty)
+    phrases:
+      - "open claude"
+      - "new claude chat"
+      - "go to claude"
+    steps:
+      - open_url: https://claude.ai/new
+
+  - name: Ask ChatGPT
+    phrases:
+      - "ask chat gpt {text}"
+      - "chat gpt {text}"
+    steps:
+      - open_url: https://chatgpt.com/
+      - wait: page
+      - paste: "{text}"
+      - press: enter
+
+  - name: Google search
+    phrases:
+      - "google {text}"
+      - "search for {text}"
+      - "search google for {text}"
+    steps:
+      - open_url: "https://www.google.com/search?q={text_url}"
+
+  - name: YouTube search
+    phrases:
+      - "youtube {text}"
+      - "search youtube for {text}"
+    steps:
+      - open_url: "https://www.youtube.com/results?search_query={text_url}"
+
+  - name: Open Gmail
+    phrases: ["open gmail", "open my email", "check email"]
+    steps:
+      - open_url: https://mail.google.com/
+
+  - name: New Gmail email
+    phrases: ["new email", "compose email", "write an email"]
+    steps:
+      - open_url: https://mail.google.com/mail/?view=cm&fs=1
+
+  - name: Open Google Calendar
+    phrases: ["open calendar", "open my calendar", "show my calendar"]
+    steps:
+      - open_url: https://calendar.google.com/
+
+  - name: Open GoHighLevel
+    phrases: ["open high level", "open go high level", "open ghl", "open my crm"]
+    steps:
+      - open_url: https://app.gohighlevel.com/
+
+  - name: Open Google Drive
+    phrases: ["open drive", "open google drive"]
+    steps:
+      - open_url: https://drive.google.com/
+
+  - name: New Google Doc
+    phrases: ["new doc", "new google doc", "create a doc"]
+    steps:
+      - open_url: https://docs.new
+
+  - name: New Google Sheet
+    phrases: ["new sheet", "new spreadsheet", "create a sheet"]
+    steps:
+      - open_url: https://sheets.new
+
+  - name: New Chrome window
+    phrases: ["new window", "open chrome", "new chrome window"]
+    steps:
+      - open_url: about:blank
+
+  - name: New tab
+    phrases: ["new tab", "open a new tab"]
+    steps:
+      - hotkey: ctrl+t
+
+  - name: Close tab
+    phrases: ["close tab", "close this tab"]
+    steps:
+      - hotkey: ctrl+w
+
+  - name: Type this
+    phrases:
+      - "type {text}"
+      - "write {text}"
+    steps:
+      - paste: "{text}"
+
+  - name: Type this and send
+    phrases:
+      - "send {text}"
+      - "type and send {text}"
+    steps:
+      - paste: "{text}"
+      - press: enter
+
+  - name: Copy
+    phrases: ["copy that", "copy this"]
+    steps:
+      - hotkey: ctrl+c
+
+  - name: Paste
+    phrases: ["paste", "paste that", "paste it"]
+    steps:
+      - hotkey: ctrl+v
+
+  - name: Undo
+    phrases: ["undo", "undo that"]
+    steps:
+      - hotkey: ctrl+z
+
+  - name: Screenshot
+    phrases: ["take a screenshot", "screenshot"]
+    steps:
+      - screenshot: true
