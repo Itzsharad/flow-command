@@ -217,7 +217,9 @@ struct SettingsView: View {
 
             section("Permissions") {
                 let _ = tick
-                permRow("Microphone & speech", Permissions.microphone && Permissions.speech) { Permissions.open(.microphone) }
+                permRow("Microphone & speech", Permissions.microphone && Permissions.speech) {
+                    if AVAuthDenied.any { Permissions.open(.microphone) } else { Permissions.requestMicrophoneAndSpeech { _ in tick += 1; Listener.shared.start() } }
+                }
                 permRow("See your screen (only for AI tasks)", Permissions.screen) { Permissions.requestScreen(); Permissions.open(.screen) }
                 permRow("Click and type", Permissions.control) { Permissions.requestControl(); Permissions.open(.accessibility) }
             }

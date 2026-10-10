@@ -1,4 +1,6 @@
 import AppKit
+import AVFoundation
+import Speech
 import SwiftUI
 
 @main
@@ -61,7 +63,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         LivePanelController.shared.install()
-        if AppSettings.shared.onboarded {
+        let s = AppSettings.shared
+        // After an update macOS may forget the microphone permission — send people back to that step.
+        let micUnknown = AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined
+            || SFSpeechRecognizer.authorizationStatus() == .notDetermined
+        if s.onboarded && micUnknown {
+            s.onboarded = false
+            s.onboardingStep = 1
+        }
+        if s.onboarded {
             startServices()
         } else {
             showOnboarding()
