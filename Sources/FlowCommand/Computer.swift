@@ -26,21 +26,21 @@ final class Computer {
     /// Long edge of the screenshot sent to the AI (keeps it fast and inside the API limits).
     static let maxLongEdge: Double = 1366
 
-    static func targetSize(points: CGSize) -> CGSize {
+    static func targetSize(points: CGSize, maxEdge: Double = maxLongEdge) -> CGSize {
         let long = max(points.width, points.height)
-        let s = min(1.0, maxLongEdge / long)
+        let s = min(1.0, maxEdge / long)
         return CGSize(width: (points.width * s).rounded(), height: (points.height * s).rounded())
     }
 
     /// Captures the main display, hiding Flow Command's own windows. Returns JPEG data.
-    func screenshot() async throws -> Data {
+    func screenshot(maxEdge: Double = Computer.maxLongEdge, quality: Double = 0.8) async throws -> Data {
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
         guard let display = content.displays.first(where: { $0.displayID == CGMainDisplayID() }) ?? content.displays.first
         else { throw ShotError.noDisplay }
         let me = content.applications.filter { $0.processID == ProcessInfo.processInfo.processIdentifier }
         let filter = SCContentFilter(display: display, excludingApplications: me, exceptingWindows: [])
         let points = CGSize(width: display.width, height: display.height)
-        let target = Computer.targetSize(points: points)
+        let target = Computer.targetSize(points: points, maxEdge: maxEdge)
         let config = SCStreamConfiguration()
         config.width = Int(target.width)
         config.height = Int(target.height)
@@ -49,7 +49,7 @@ final class Computer {
         scale = Double(points.width) / Double(target.width)
         shotSize = target
         let rep = NSBitmapImageRep(cgImage: image)
-        guard let data = rep.representation(using: .jpeg, properties: [.compressionFactor: 0.8]) else { throw ShotError.encode }
+        guard let data = rep.representation(using: .jpeg, properties: [.compressionFactor: quality]) else { throw ShotError.encode }
         return data
     }
 

@@ -43,6 +43,14 @@ enum SelfTest {
         let p = Computer.shared.fromNormalized(500, 500)
         check(abs(p.x - 683) < 1 && abs(p.y - 427) < 1, "0-1000 coordinates map to the screen")
 
+        // Natural phrasing without "and"
+        check(LocalIntents.parse("go to the search box", appExists: exists) == .keys("cmd+l", label: "Address bar"), "search box")
+        check(LocalIntents.parse("click Claude AI", appExists: exists) == .openURL("claude.ai"), "click a site")
+        check(LocalIntents.parseChain("go to the search box click claude AI", appExists: exists) ==
+              [.keys("cmd+l", label: "Address bar"), .openURL("claude.ai")], "chain without and")
+        check(LocalIntents.parseChain("open chrome open new tab type hello world", appExists: exists) ==
+              [.openApp("chrome"), .keys("cmd+t", label: "New tab"), .type("hello world")], "spoken chain")
+
         // Waits longer when you pause mid-sentence
         check(Listener.pauseNeeded(after: "go to the search bar and") > 3, "waits after 'and'")
         check(Listener.pauseNeeded(after: "open chrome") < 2, "normal pause")

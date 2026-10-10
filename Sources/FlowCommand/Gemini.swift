@@ -84,6 +84,61 @@ struct GeminiClient {
         throw GeminiError.badReply
     }
 
+    /// Fast path (~1 second, text only, no screenshot): turn a spoken instruction into simple steps
+    /// the Mac can run instantly. Returns nil steps when the task truly needs to look at the screen.
+    func plan(_ instruction: String) async throws -> [[String: Any]]? {
+        let system = """
+        You turn a spoken Mac instruction into simple steps, when that's possible WITHOUT looking at the screen.
+        The text is speech-to-text: fix obvious mistakes ("cloud"/"clod" usually means Claude → claude.ai).
+        Step actions:
+        - {"action":"open_app","app":"Google Chrome"}
+        - {"action":"open_url","url":"claude.ai"}          (opens a website in the browser — use this for "click X" when X is a website)
+        - {"action":"keys","keys":"cmd+t"}                  (macOS shortcuts: cmd+t new tab, cmd+n new window, cmd+w close tab, cmd+l address bar, cmd+r reload, Return)
+        - {"action":"type","text":"…"}                      (types into whatever is focused)
+        - {"action":"search","query":"…"}                    (Google search)
+        Reply with ONLY JSON: {"needs_screen": false, "steps": [ … ]}
+        If doing it needs to see the screen (clicking a specific button or item, reading or choosing something visible, filling a form, switching accounts), reply {"needs_screen": true, "steps": []}.
+        """
+        let obj = try await request([
+            "model": model, "temperature": 0, "max_tokens": 500,
+            "messages": [["role": "system", "content": system], ["role": "user", "content": instruction]],
+        ], timeout: 20)
+        guard let text = GeminiClient.replyText(obj),
+              let start = text.firstIndex(of: "{"), let end = text.lastIndex(of: "}"), start < end,
+              let data = String(text[start...end]).data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        if (json["needs_screen"] as? Bool) == true { return nil }
+        let steps = json["steps"] as? [[String: Any]] ?? []
+        return steps.isEmpty ? nil : steps
+    }
+
+    /// Converts planned steps into local actions; nil if anything is unknown.
+    static func localIntents(from steps: [[String: Any]]) -> [LocalIntent]? {
+        var out: [LocalIntent] = []
+        for st in steps {
+            switch st["action"] as? String ?? "" {
+            case "open_app":
+                guard let a = st["app"] as? String, Computer.findApp(named: a) != nil else { return nil }
+                out.append(.openApp(a))
+            case "open_url":
+                guard let u = st["url"] as? String, Computer.normalizeURL(u) != nil else { return nil }
+                out.append(.openURL(u.replacingOccurrences(of: "https://", with: "")))
+            case "keys":
+                guard let k = st["keys"] as? String, (try? Computer.parseCombo(k)) != nil else { return nil }
+                out.append(.keys(k, label: "Pressing \(k)"))
+            case "type":
+                guard let t = st["text"] as? String, !t.isEmpty else { return nil }
+                out.append(.type(t))
+            case "search":
+                guard let q = st["query"] as? String, !q.isEmpty else { return nil }
+                out.append(.search(q))
+            default:
+                return nil
+            }
+        }
+        return out.isEmpty ? nil : out
+    }
+
     static func verify(key: String, model: String) async -> String? {
         let c = GeminiClient(apiKey: key, model: model)
         do {

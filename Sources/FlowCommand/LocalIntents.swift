@@ -91,13 +91,48 @@ enum LocalIntents {
             rest = String(rest[cut.upperBound...]).trimmingCharacters(in: .whitespaces)
         }
         parts = parts.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-        guard parts.count >= 2 else { return nil }
         var out: [LocalIntent] = []
         for p in parts {
-            guard let i = parse(p, appExists: appExists) else { return nil }
-            out.append(i)
+            if let i = parse(p, appExists: appExists) { out.append(i); continue }
+            // try splitting where a new command starts without "and"
+            let pieces = verbSplit(p)
+            guard pieces.count >= 2 else { return nil }
+            for piece in pieces {
+                guard let i = parse(piece, appExists: appExists) else { return nil }
+                out.append(i)
+            }
         }
-        return out
+        return out.count >= 2 ? out : nil
+    }
+
+    static let commandStarts = ["open ", "go to ", "click on ", "click ", "type ", "write ", "search for ", "search google for ",
+                                "google ", "press ", "hit ", "new tab", "close tab", "launch ", "visit ", "scroll "]
+
+    /// "go to the search box click claude ai" → ["go to the search box", "click claude ai"].
+    /// Everything after "type"/"write"/"search" stays together (it's the text).
+    static func verbSplit(_ raw: String) -> [String] {
+        let lower = raw.lowercased()
+        var cuts: [String.Index] = []
+        for verb in commandStarts {
+            var from = lower.index(after: lower.startIndex)
+            while from < lower.endIndex, let r = lower.range(of: " " + verb, range: from..<lower.endIndex) {
+                cuts.append(lower.index(after: r.lowerBound))
+                from = r.upperBound
+            }
+        }
+        let free = ["type ", "write ", "search for ", "search google for ", "google "]
+        var pieces: [String] = []
+        var start = raw.startIndex
+        for cut in Set(cuts).sorted() where cut > start {
+            let piece = String(raw[start..<cut]).trimmingCharacters(in: .whitespaces)
+            if free.contains(where: { piece.lowercased().hasPrefix($0) }) { break }   // keep typed text whole
+            // "open new tab" contains two starts ("open", "new tab") — don't leave a bare verb on its own
+            if ["open", "go to", "click", "click on", "launch", "visit", "press", "hit"].contains(piece.lowercased()) { continue }
+            pieces.append(piece)
+            start = cut
+        }
+        pieces.append(String(raw[start...]).trimmingCharacters(in: .whitespaces))
+        return pieces.filter { !$0.isEmpty }
     }
 
     /// One simple instruction, or nil.
@@ -127,6 +162,22 @@ enum LocalIntents {
         case "previous tab": return .keys("ctrl+shift+Tab", label: "Previous tab")
         case "scroll down", "scroll up": return .scroll(t == "scroll down" ? "down" : "up")
         default: break
+        }
+
+        // "go to the search box", "click the address bar", "search bar" … → focus the address bar
+        let barWords = t.replacingOccurrences(of: "go to ", with: "").replacingOccurrences(of: "click on ", with: "")
+            .replacingOccurrences(of: "click ", with: "").replacingOccurrences(of: "the ", with: "")
+        if ["search box", "search bar", "search field", "address bar", "url bar", "address box", "url box"].contains(barWords) {
+            return .keys("cmd+l", label: "Address bar")
+        }
+
+        // "click (on) Claude AI" — clicking a well-known site means opening it
+        for prefix in ["click on ", "click "] where t.hasPrefix(prefix) {
+            var target = String(t.dropFirst(prefix.count))
+            if target.hasPrefix("the ") { target = String(target.dropFirst(4)) }
+            if looksLikeDomain(target) { return .openURL(target) }
+            if let site = sites[target] { return .openURL(site) }
+            return nil
         }
 
         for prefix in ["search google for ", "google search ", "search for ", "google "] where t.hasPrefix(prefix) {

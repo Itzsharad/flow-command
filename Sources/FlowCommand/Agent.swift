@@ -166,6 +166,15 @@ final class Agent: ObservableObject {
             guard await ensureScreen(id) else { return }
             await runClaude(text, key: claudeKey, id: id)
         } else if !geminiKey.isEmpty {
+            // Fast path first: ~1 second, text only. Most instructions never need a screenshot.
+            setStatus(id, "Understanding…")
+            let client = GeminiClient(apiKey: geminiKey, model: settings.geminiModel)
+            if let steps = try? await client.plan(text), let intents = GeminiClient.localIntents(from: steps) {
+                if Task.isCancelled { return }
+                await runLocalChain(intents, id: id)
+                return
+            }
+            if Task.isCancelled { return }
             guard await ensureScreen(id) else { return }
             await runGemini(text, key: geminiKey, id: id)
         } else if !claudeKey.isEmpty {
@@ -306,7 +315,7 @@ final class Agent: ObservableObject {
             if Task.isCancelled { return }
             setStatus(id, "Looking at the screen…")
             let shot: Data
-            do { shot = try await computer.screenshot() } catch {
+            do { shot = try await computer.screenshot(maxEdge: 1100, quality: 0.6) } catch {
                 finish(id, ok: false, "I couldn't see the screen. Turn on Flow Command under Screen Recording, then ask again.", fix: .screen)
                 return
             }
@@ -394,7 +403,7 @@ final class Agent: ObservableObject {
         default:
             result = "Error: unknown action \(name)"
         }
-        try? await Task.sleep(nanoseconds: 600_000_000)   // let the screen settle
+        try? await Task.sleep(nanoseconds: 350_000_000)   // let the screen settle
         return (desc, result, false)
     }
 
