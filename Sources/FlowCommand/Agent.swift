@@ -137,10 +137,11 @@ final class Agent: ObservableObject {
             finish(id, ok: false, "Add your Anthropic API key in Settings to do multi-step tasks.")
             return
         }
-        guard Permissions.screen, Permissions.control else {
-            finish(id, ok: false, "Flow Command needs screen and control permission. Open Settings › Permissions.")
+        guard Permissions.control else {
+            finish(id, ok: false, "Flow Command needs “Click and type” permission. Open Settings › Permissions.")
             return
         }
+        // Screen access is checked by actually taking a screenshot (macOS's quick check can be wrong for test builds).
         await runClaude(text, key: key, id: id)
     }
 

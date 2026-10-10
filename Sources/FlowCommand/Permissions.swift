@@ -9,7 +9,21 @@ import Speech
 enum Permissions {
     static var microphone: Bool { AVCaptureDevice.authorizationStatus(for: .audio) == .authorized }
     static var speech: Bool { SFSpeechRecognizer.authorizationStatus() == .authorized }
-    static var screen: Bool { CGPreflightScreenCaptureAccess() }
+    /// macOS's quick check can wrongly say "no" for test builds, so a real capture that works also counts.
+    static var screen: Bool { CGPreflightScreenCaptureAccess() || UserDefaults.standard.bool(forKey: "screenConfirmed") }
+
+    /// Actually tries to read the screen once; if it works, permission is on.
+    static func confirmScreenAccess(_ done: @escaping (Bool) -> Void) {
+        Task {
+            do {
+                _ = try await Computer.shared.screenshot()
+                UserDefaults.standard.set(true, forKey: "screenConfirmed")
+                onMain { done(true) }
+            } catch {
+                onMain { done(false) }
+            }
+        }
+    }
     static var control: Bool { AXIsProcessTrusted() }
 
     static func requestMicrophoneAndSpeech(_ done: @escaping (Bool) -> Void) {

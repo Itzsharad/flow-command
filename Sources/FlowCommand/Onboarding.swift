@@ -420,7 +420,10 @@ struct OnboardingView: View {
             if Permissions.screen { PrimaryButton(title: "Continue") { step = 3 } }
             else {
                 HStack(spacing: 10) {
-                    SecondaryButton(title: "I turned it on — reopen") { AppDelegate.relaunch() }
+                    skipLink { step = 3 }
+                    SecondaryButton(title: "I turned it on — check") {
+                        Permissions.confirmScreenAccess { ok in if ok { step = 3 } else { tick += 1 } }
+                    }
                     PrimaryButton(title: "Allow screen access") { Permissions.requestScreen(); Permissions.open(.screen) }
                 }
             }
@@ -428,6 +431,7 @@ struct OnboardingView: View {
             if Permissions.control { PrimaryButton(title: "Continue") { step = 4 } }
             else {
                 HStack(spacing: 10) {
+                    skipLink { step = 4 }
                     SecondaryButton(title: "Already on — reopen") { AppDelegate.relaunch() }
                     PrimaryButton(title: "Open System Settings") { Permissions.requestControl(); Permissions.open(.accessibility) }
                 }
@@ -441,6 +445,11 @@ struct OnboardingView: View {
         default:
             PrimaryButton(title: "Finish setup") { step = 7 }
         }
+    }
+
+    /// Never trap anyone on a permission screen: they can always move on and fix it later in Settings.
+    private func skipLink(_ action: @escaping () -> Void) -> some View {
+        Button("Skip for now", action: action).buttonStyle(.plain).foregroundColor(Theme.muted).font(.system(size: 14)).padding(.trailing, 4)
     }
 
     private func autoAdvance() {
