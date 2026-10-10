@@ -1,0 +1,152 @@
+import AppKit
+import SwiftUI
+
+@main
+enum Main {
+    static func main() {
+        let args = CommandLine.arguments
+        if args.contains("--selftest") { exit(SelfTest.run()) }
+        // Never start the app if launched with helper-style arguments.
+        if args.dropFirst().contains(where: { $0 == "-c" || $0 == "-m" }) { exit(0) }
+        FlowCommandApp.main()
+    }
+}
+
+struct FlowCommandApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
+    @ObservedObject var listener = Listener.shared
+    @ObservedObject var agent = Agent.shared
+
+    var body: some Scene {
+        MenuBarExtra {
+            MenuBarView()
+        } label: {
+            Image(systemName: menuIcon)
+        }
+        .menuBarExtraStyle(.window)
+    }
+
+    private var menuIcon: String {
+        if agent.isBusy { return "waveform.circle.fill" }
+        switch listener.mode {
+        case .awake, .holding: return "mic.fill"
+        case .asleep, .off: return "mic"
+        }
+    }
+}
+
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    static weak var shared: AppDelegate?
+    private var onboardingWindow: NSWindow?
+    private var mainWindow: NSWindow?
+    private var lockHandle: FileHandle?
+    private var servicesStarted = false
+
+    override init() {
+        super.init()
+        AppDelegate.shared = self
+    }
+
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        // Only one copy may ever run.
+        if !SingleInstance.acquire() {
+            if let other = NSRunningApplication.runningApplications(withBundleIdentifier: Bundle.main.bundleIdentifier ?? "")
+                .first(where: { $0 != NSRunningApplication.current }) {
+                other.activate()
+            }
+            exit(0)
+        }
+    }
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(.accessory)
+        LivePanelController.shared.install()
+        if AppSettings.shared.onboarded {
+            startServices()
+        } else {
+            showOnboarding()
+        }
+    }
+
+    /// Start listening and watching for the hotkey. Only ever called after setup (or on its "Try it" step).
+    func startServices() {
+        let listener = Listener.shared, agent = Agent.shared, keys = HotKeys.shared
+        if !servicesStarted {
+            servicesStarted = true
+            listener.onInstruction = { agent.handle($0) }
+            listener.onStopWord = { agent.stop() }
+            listener.isBusy = { agent.isBusy }
+            listener.onSleep = { agent.resetConversation() }
+            keys.onHoldDown = { listener.holdBegan() }
+            keys.onHoldUp = { listener.holdEnded() }
+            keys.onEscape = {
+                if agent.isBusy { agent.stop() } else if listener.mode == .awake { listener.sleep() }
+            }
+        }
+        listener.start()
+        if Permissions.control { keys.start() }
+    }
+
+    func showOnboarding() {
+        if onboardingWindow == nil {
+            let view = OnboardingView(onFinish: { [weak self] in
+                self?.onboardingWindow?.close()
+                self?.onboardingWindow = nil
+                self?.startServices()
+                self?.showMain()
+            })
+            onboardingWindow = makeWindow(view, size: NSSize(width: 820, height: 560), title: "Welcome to Flow Command", resizable: false)
+        }
+        present(onboardingWindow)
+    }
+
+    func showMain() {
+        if mainWindow == nil {
+            mainWindow = makeWindow(MainWindowView(), size: NSSize(width: 1040, height: 720), title: "Flow Command", resizable: true)
+        }
+        present(mainWindow)
+    }
+
+    private func makeWindow<V: View>(_ view: V, size: NSSize, title: String, resizable: Bool) -> NSWindow {
+        var style: NSWindow.StyleMask = [.titled, .closable, .miniaturizable, .fullSizeContentView]
+        if resizable { style.insert(.resizable) }
+        let w = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: style, backing: .buffered, defer: false)
+        w.title = title
+        w.titleVisibility = .hidden
+        w.titlebarAppearsTransparent = true
+        w.isReleasedWhenClosed = false
+        w.contentView = NSHostingView(rootView: view)
+        w.center()
+        return w
+    }
+
+    private func present(_ w: NSWindow?) {
+        NSApp.activate(ignoringOtherApps: true)
+        w?.makeKeyAndOrderFront(nil)
+    }
+
+    /// Some permissions only take effect after reopening. Reopens once, cleanly.
+    static func relaunch() {
+        let path = Bundle.main.bundlePath
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/bin/sh")
+        p.arguments = ["-c", "sleep 1.5; /usr/bin/open \"\(path)\""]
+        try? p.run()
+        NSApp.terminate(nil)
+    }
+}
+
+/// A lock file that only one running copy can hold.
+enum SingleInstance {
+    private static var fd: Int32 = -1
+
+    static func acquire() -> Bool {
+        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("FlowCommand", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let path = dir.appendingPathComponent(".running.lock").path
+        fd = open(path, O_CREAT | O_RDWR, 0o600)
+        guard fd >= 0 else { return true }
+        return flock(fd, LOCK_EX | LOCK_NB) == 0
+    }
+}

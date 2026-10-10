@@ -10,46 +10,58 @@ permissions:
 
 jobs:
   build:
-    runs-on: macos-14   # Apple Silicon (M1/M2/M3/M4)
+    runs-on: macos-15   # Apple Silicon
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install
-        run: pip install -r requirements.txt pyinstaller pillow
-
-      - name: Make app icon
+      - name: Compile
         run: |
-          python make_icon.py
-          iconutil -c icns icon.iconset -o icon.icns
+          set +e
+          swift build -c release --arch arm64 > build.log 2>&1
+          code=$?
+          tail -60 build.log
+          if [ $code -ne 0 ]; then
+            errs=$(grep -E "error:" build.log | sort -u | head -40 | sed -e 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=Compile failed::$errs"
+            exit 1
+          fi
 
-      - name: Build app
-        run: pyinstaller --noconfirm FlowCommand.spec
+      - name: Check it compiled
+        run: test -f .build/arm64-apple-macosx/release/FlowCommand
 
-      - name: Self-test the built app
+      - name: Assemble FlowCommand.app
         run: |
-          dist/FlowCommand.app/Contents/MacOS/FlowCommand --selftest
-          sleep 5
-          left=$(pgrep -x FlowCommand | wc -l | tr -d ' ')
-          echo "FlowCommand processes left after self-test: $left"
-          [ "$left" -eq 0 ] || { pgrep -lf FlowCommand; exit 1; }
+          pip3 install --break-system-packages -q pillow || pip3 install -q pillow
+          python3 make_icon.py
+          iconutil -c icns icon.iconset -o AppIcon.icns
+          APP=dist/FlowCommand.app
+          mkdir -p $APP/Contents/MacOS $APP/Contents/Resources
+          cp .build/arm64-apple-macosx/release/FlowCommand $APP/Contents/MacOS/FlowCommand
+          cp Info.plist $APP/Contents/Info.plist
+          cp AppIcon.icns $APP/Contents/Resources/AppIcon.icns
+          codesign --force --deep --sign - $APP
+          codesign --verify --verbose $APP
 
-      - name: Real-launch test (no runaway copies, single instance)
+      - name: Self-test (logic)
+        run: |
+          out=$(dist/FlowCommand.app/Contents/MacOS/FlowCommand --selftest 2>&1) || { echo "::error title=Self-test failed::$out"; exit 1; }
+          echo "$out"
+
+      - name: Launch test (one copy only, no runaway, stays up)
         run: |
           APP=dist/FlowCommand.app/Contents/MacOS/FlowCommand
-          "$APP" & "$APP" & "$APP" &
-          # first launch downloads the speech model — the step that misbehaved in v1
-          for i in $(seq 1 18); do
-            sleep 5
+          "$APP" & sleep 3
+          "$APP" & "$APP" &
+          for i in $(seq 1 8); do
+            sleep 3
             n=$(pgrep -x FlowCommand | wc -l | tr -d ' ')
-            echo "t=$((i*5))s  FlowCommand processes: $n"
-            if [ "$n" -gt 2 ]; then echo "RUNAWAY DETECTED"; pgrep -lf FlowCommand; pkill -9 -x FlowCommand; exit 1; fi
+            echo "t=$((3 + i*3))s  FlowCommand processes: $n"
+            if [ "$n" -gt 1 ]; then echo "::error title=Launch test::more than one copy ($n)"; pgrep -lf FlowCommand; pkill -9 -x FlowCommand; exit 1; fi
           done
-          grep -q "model ready" ~/Library/Logs/FlowCommand.log && echo "model loaded OK" || { echo "model did not load"; cat ~/Library/Logs/FlowCommand.log; pkill -9 -x FlowCommand; exit 1; }
-          pkill -9 -x FlowCommand || true
+          n=$(pgrep -x FlowCommand | wc -l | tr -d ' ')
+          if [ "$n" -ne 1 ]; then echo "::error title=Launch test::app did not stay running"; exit 1; fi
+          echo "CPU of the running app:"; ps -o %cpu=,rss= -p $(pgrep -x FlowCommand)
+          pkill -x FlowCommand || true
 
       - name: Make installer (.dmg)
         run: |

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key><string>Flow Command</string>
+    <key>CFBundleDisplayName</key><string>Flow Command</string>
+    <key>CFBundleIdentifier</key><string>com.sharad.flowcommand</string>
+    <key>CFBundleExecutable</key><string>FlowCommand</string>
+    <key>CFBundleIconFile</key><string>AppIcon</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleShortVersionString</key><string>2.0.0</string>
+    <key>CFBundleVersion</key><string>2</string>
+    <key>LSMinimumSystemVersion</key><string>14.0</string>
+    <key>LSUIElement</key><true/>
+    <key>NSHighResolutionCapable</key><true/>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Flow Command listens for your wake phrase and your instructions. Speech is turned into text on this Mac.</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>Flow Command turns what you say into text on this Mac so it can follow your instructions.</string>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Flow Command opens and controls apps when you ask it to.</string>
+</dict>
+</plist>
