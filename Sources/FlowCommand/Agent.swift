@@ -184,7 +184,8 @@ final class Agent: ObservableObject {
             return true
         } catch {
             onMain { Permissions.requestScreen() }
-            finish(id, ok: false, "To do this I need to see your screen. Turn on Flow Command in the list, then ask again.", fix: .screen)
+            let reason = (error as NSError).localizedDescription
+            finish(id, ok: false, "I can't see your screen yet. If Flow Command is already on in that list: remove it with –, quit and reopen Flow Command, then allow again. (\(reason))", fix: .screen)
             return false
         }
     }
