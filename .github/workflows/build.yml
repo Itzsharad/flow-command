@@ -30,7 +30,26 @@ jobs:
         run: pyinstaller --noconfirm FlowCommand.spec
 
       - name: Self-test the built app
-        run: dist/FlowCommand.app/Contents/MacOS/FlowCommand --selftest
+        run: |
+          dist/FlowCommand.app/Contents/MacOS/FlowCommand --selftest
+          sleep 5
+          left=$(pgrep -x FlowCommand | wc -l | tr -d ' ')
+          echo "FlowCommand processes left after self-test: $left"
+          [ "$left" -eq 0 ] || { pgrep -lf FlowCommand; exit 1; }
+
+      - name: Real-launch test (no runaway copies, single instance)
+        run: |
+          APP=dist/FlowCommand.app/Contents/MacOS/FlowCommand
+          "$APP" & "$APP" & "$APP" &
+          # first launch downloads the speech model — the step that misbehaved in v1
+          for i in $(seq 1 18); do
+            sleep 5
+            n=$(pgrep -x FlowCommand | wc -l | tr -d ' ')
+            echo "t=$((i*5))s  FlowCommand processes: $n"
+            if [ "$n" -gt 2 ]; then echo "RUNAWAY DETECTED"; pgrep -lf FlowCommand; pkill -9 -x FlowCommand; exit 1; fi
+          done
+          grep -q "model ready" ~/Library/Logs/FlowCommand.log && echo "model loaded OK" || { echo "model did not load"; cat ~/Library/Logs/FlowCommand.log; pkill -9 -x FlowCommand; exit 1; }
+          pkill -9 -x FlowCommand || true
 
       - name: Make installer (.dmg)
         run: |

@@ -7,6 +7,15 @@ Lives in the menu bar (🎙). Commands live in
 
 from __future__ import annotations
 
+import multiprocessing
+
+if __name__ == "__main__":
+    # MUST run first. In a packaged app, any library that creates a
+    # multiprocessing lock (tqdm does, while downloading the speech model)
+    # re-launches this same executable as a helper. Without this line every
+    # helper started a whole new copy of the app, which started another… (v1 bug).
+    multiprocessing.freeze_support()
+
 import json
 import logging
 import os
@@ -374,6 +383,9 @@ class Recorder:
 
 class Transcriber:
     def __init__(self, model_name: str):
+        # Safety net 3: progress bars use a thread lock, never a process lock.
+        import tqdm
+        tqdm.tqdm.set_lock(threading.RLock())
         from faster_whisper import WhisperModel
         self.model = WhisperModel(model_name, device="cpu", compute_type="int8")
 
@@ -635,6 +647,19 @@ def build_app():
 
 # ════════════════════════════════════════════════════════════
 
+def acquire_single_instance():
+    """Returns an open lock file if we're the only copy running, else None."""
+    import fcntl
+    SUPPORT_DIR.mkdir(parents=True, exist_ok=True)
+    f = open(SUPPORT_DIR / ".running.lock", "w")
+    try:
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        f.close()
+        return None
+    return f
+
+
 def selftest():
     """Used by the GitHub build to check everything was bundled."""
     try:
@@ -650,6 +675,10 @@ def selftest():
             m = match_command(said, book.commands)
             assert m and m.command["name"] == name and m.text == text, (said, m)
         hotkey_mask(book.settings["hotkey"])
+        # exercise the exact thing that caused the v1 runaway: a process lock
+        lock = multiprocessing.RLock()
+        with lock:
+            pass
         out("SELFTEST OK")
         return 0
     except Exception as e:
@@ -664,6 +693,15 @@ if __name__ == "__main__":
         book = CommandBook(resource("commands.yaml"))
         m = match_command(" ".join(sys.argv[2:]), book.commands, book.settings["min_match_score"])
         out(f"{m.command['name']} | text={m.text!r} | score={m.score:.0f}" if m else "no match")
+        sys.exit(0)
+    # Safety net 1: if we were launched as some library's helper process
+    # (anything with interpreter-style arguments), never start the app.
+    if any(a in ("-c", "-m", "--multiprocessing-fork") or a.startswith("from multiprocessing")
+           for a in sys.argv[1:]):
+        sys.exit(0)
+    # Safety net 2: only one copy of Flow Command may ever run.
+    _lock = acquire_single_instance()
+    if _lock is None:
         sys.exit(0)
     setup_logging()
     log.info("starting")
