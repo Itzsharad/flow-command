@@ -87,8 +87,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             listener.onStopWord = { agent.stop() }
             listener.isBusy = { agent.isBusy }
             listener.onSleep = { agent.resetConversation() }
-            keys.onHoldDown = { listener.holdBegan() }
-            keys.onHoldUp = { listener.holdEnded() }
+            // Your talk key is also the off switch:
+            //  • pressed while a task runs → stops it and goes to sleep
+            //  • pressed while awake (woken by voice) → goes to sleep right away
+            //  • otherwise → hold to talk, let go to send
+            var swallowRelease = false
+            keys.onHoldDown = {
+                if agent.isBusy {
+                    agent.stop(); listener.sleep(); swallowRelease = true
+                } else if listener.mode == .awake {
+                    listener.sleep(); Sound.play("Pop"); swallowRelease = true
+                } else {
+                    listener.holdBegan()
+                }
+            }
+            keys.onHoldUp = {
+                if swallowRelease { swallowRelease = false; return }
+                listener.holdEnded()
+            }
             keys.onEscape = {
                 if agent.isBusy { agent.stop() } else if listener.mode == .awake { listener.sleep() }
             }

@@ -160,7 +160,8 @@ final class Agent: ObservableObject {
             finish(id, ok: false, "I need “click and type” permission for that.", fix: .control)
             return
         }
-        let claudeKey = settings.apiKey ?? "", geminiKey = settings.geminiKey ?? ""
+        let claudeKey = settings.hasAPIKey ? (settings.apiKey ?? "") : ""
+        let geminiKey = settings.hasGeminiKey ? (settings.geminiKey ?? "") : ""
         if settings.brain == "claude", !claudeKey.isEmpty {
             guard await ensureScreen(id) else { return }
             await runClaude(text, key: claudeKey, id: id)

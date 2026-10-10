@@ -268,12 +268,20 @@ final class Listener: ObservableObject {
     private func tick() {
         guard mode == .awake else { return }
         let p = pending
-        if !p.isEmpty, Date().timeIntervalSince(lastChange) > 1.3 {
+        if !p.isEmpty, Date().timeIntervalSince(lastChange) > Listener.pauseNeeded(after: p) {
             submit()
         } else if p.isEmpty, !isBusy(), replyInterceptor == nil, settings.sleepAfter > 0,
                   Date().timeIntervalSince(lastActivity) > Double(settings.sleepAfter) {
             sleep()
         }
+    }
+
+    /// How long a pause ends an instruction. Longer when the sentence clearly isn't finished ("…and", "…to the").
+    static func pauseNeeded(after text: String) -> Double {
+        let last = WakeMatcher.words(text).last ?? ""
+        let unfinished = ["and", "then", "to", "the", "a", "an", "of", "for", "in", "on", "with", "into", "type", "write",
+                          "search", "open", "go", "click", "my", "at", "from", "about", "so", "but", "or", "is", "that"]
+        return unfinished.contains(last) ? 3.5 : 1.8
     }
 
     private func submit() {

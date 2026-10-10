@@ -43,6 +43,10 @@ enum SelfTest {
         let p = Computer.shared.fromNormalized(500, 500)
         check(abs(p.x - 683) < 1 && abs(p.y - 427) < 1, "0-1000 coordinates map to the screen")
 
+        // Waits longer when you pause mid-sentence
+        check(Listener.pauseNeeded(after: "go to the search bar and") > 3, "waits after 'and'")
+        check(Listener.pauseNeeded(after: "open chrome") < 2, "normal pause")
+
         // Wake phrase
         check(WakeMatcher.match("flow command activate", phrase: "Flow Command, activate") == [], "wake exact")
         check(WakeMatcher.match("hey flow commander activate open chrome", phrase: "Flow Command, activate") == ["open", "chrome"], "wake fuzzy + carry")

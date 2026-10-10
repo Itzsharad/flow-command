@@ -133,8 +133,11 @@ final class AppSettings: ObservableObject {
         brain = d.string(forKey: "brain") ?? "gemini"
         geminiModel = d.string(forKey: "geminiModel") ?? "gemini-3.8-flash"
         browser = d.string(forKey: "browser") ?? ""
-        hasAPIKey = !(Keychain.get("anthropic") ?? "").isEmpty
-        hasGeminiKey = !(Keychain.get("gemini") ?? "").isEmpty
+        // Remember *whether* keys exist without reading the Keychain at every launch (which makes macOS ask).
+        if d.object(forKey: "hasClaudeKey") == nil { d.set(!(Keychain.get("anthropic") ?? "").isEmpty, forKey: "hasClaudeKey") }
+        if d.object(forKey: "hasGeminiKeyFlag") == nil { d.set(!(Keychain.get("gemini") ?? "").isEmpty, forKey: "hasGeminiKeyFlag") }
+        hasAPIKey = d.bool(forKey: "hasClaudeKey")
+        hasGeminiKey = d.bool(forKey: "hasGeminiKeyFlag")
     }
 
     private func save<T: Encodable>(_ v: T, _ key: String) {
@@ -146,6 +149,7 @@ final class AppSettings: ObservableObject {
         set {
             if let v = newValue, !v.isEmpty { Keychain.set(v, account: "anthropic") } else { Keychain.delete("anthropic") }
             hasAPIKey = !(newValue ?? "").isEmpty
+            d.set(hasAPIKey, forKey: "hasClaudeKey")
         }
     }
 
@@ -154,6 +158,7 @@ final class AppSettings: ObservableObject {
         set {
             if let v = newValue, !v.isEmpty { Keychain.set(v, account: "gemini") } else { Keychain.delete("gemini") }
             hasGeminiKey = !(newValue ?? "").isEmpty
+            d.set(hasGeminiKey, forKey: "hasGeminiKeyFlag")
         }
     }
 
