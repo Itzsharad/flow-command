@@ -241,7 +241,7 @@ enum Browser {
         guard let bundle = chromium[browser] else { return "Pick Chrome, Brave or Edge as your browser first." }
         if !isRunning(browser) {
             if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundle) {
-                NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
+                _ = try? await NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
             } else { return "\(browser) isn't installed." }
             for _ in 0..<20 where !isRunning(browser) { try? await Task.sleep(nanoseconds: 300_000_000) }
             try? await Task.sleep(nanoseconds: 1_500_000_000)
