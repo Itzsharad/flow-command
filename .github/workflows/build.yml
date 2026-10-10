@@ -29,6 +29,31 @@ jobs:
       - name: Check it compiled
         run: test -f .build/arm64-apple-macosx/release/FlowCommand
 
+      # The same signing certificate is reused for every build, so macOS
+      # remembers Flow Command's permissions across updates.
+      - name: Restore signing certificate
+        uses: actions/cache@v4
+        with:
+          path: signing
+          key: flowcommand-signing-v1
+
+      - name: Prepare signing identity
+        run: |
+          mkdir -p signing
+          if [ ! -f signing/cert.p12 ]; then
+            echo "Creating a new signing certificate (first build only)"
+            printf '[req]\ndistinguished_name=dn\nx509_extensions=ext\nprompt=no\n[dn]\nCN=Flow Command Developer\n[ext]\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=critical,codeSigning\nbasicConstraints=critical,CA:false\n' > signing/cert.cnf
+            /usr/bin/openssl req -x509 -newkey rsa:2048 -nodes -keyout signing/key.pem -out signing/cert.pem -days 3650 -config signing/cert.cnf
+            /usr/bin/openssl pkcs12 -export -inkey signing/key.pem -in signing/cert.pem -out signing/cert.p12 -passout pass:flowcommand
+          fi
+          security create-keychain -p ci build.keychain
+          security list-keychains -d user -s build.keychain $(security list-keychains -d user | tr -d '"')
+          security unlock-keychain -p ci build.keychain
+          security import signing/cert.p12 -k build.keychain -P flowcommand -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k ci build.keychain >/dev/null
+          sudo security add-trusted-cert -d -r trustRoot -p codeSign -k /Library/Keychains/System.keychain signing/cert.pem || true
+          security find-identity -v -p codesigning build.keychain || true
+
       - name: Assemble FlowCommand.app
         run: |
           pip3 install --break-system-packages -q pillow || pip3 install -q pillow
@@ -39,8 +64,14 @@ jobs:
           cp .build/arm64-apple-macosx/release/FlowCommand $APP/Contents/MacOS/FlowCommand
           cp Info.plist $APP/Contents/Info.plist
           cp AppIcon.icns $APP/Contents/Resources/AppIcon.icns
-          codesign --force --deep --sign - $APP
+          if codesign --force --deep --keychain build.keychain --sign "Flow Command Developer" $APP; then
+            echo "Signed with the stable Flow Command certificate"
+          else
+            echo "::warning title=Signing::Stable certificate failed — falling back to ad-hoc (permissions will reset on update)"
+            codesign --force --deep --sign - $APP
+          fi
           codesign --verify --verbose $APP
+          codesign -d -r- $APP 2>&1 | tail -2
 
       - name: Self-test (logic)
         run: |

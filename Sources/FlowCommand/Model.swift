@@ -82,7 +82,7 @@ final class AppSettings: ObservableObject {
     private let d = UserDefaults.standard
 
     @Published var onboarded: Bool { didSet { d.set(onboarded, forKey: "onboarded") } }
-    @Published var onboardingStep: Int { didSet { d.set(onboardingStep, forKey: "onboardingStep") } }
+    @Published var onboardingStep: Int { didSet { d.set(onboardingStep, forKey: "setupStep") } }
     @Published var wakeEnabled: Bool { didSet { d.set(wakeEnabled, forKey: "wakeEnabled") } }
     @Published var wakePhrase: String { didSet { d.set(wakePhrase, forKey: "wakePhrase") } }
     @Published var holdKeyEnabled: Bool { didSet { d.set(holdKeyEnabled, forKey: "holdKeyEnabled") } }
@@ -95,7 +95,13 @@ final class AppSettings: ObservableObject {
     @Published var askBeforePost: Bool { didSet { d.set(askBeforePost, forKey: "askBeforePost") } }
     @Published var sounds: Bool { didSet { d.set(sounds, forKey: "sounds") } }
     @Published var model: String { didSet { d.set(model, forKey: "model") } }
+    /// "gemini" (free) or "claude" (paid)
+    @Published var brain: String { didSet { d.set(brain, forKey: "brain") } }
+    @Published var geminiModel: String { didSet { d.set(geminiModel, forKey: "geminiModel") } }
+    /// App name used for websites ("" = system default browser)
+    @Published var browser: String { didSet { d.set(browser, forKey: "browser") } }
     @Published var hasAPIKey: Bool = false
+    @Published var hasGeminiKey: Bool = false
 
     init() {
         d.register(defaults: [
@@ -103,10 +109,11 @@ final class AppSettings: ObservableObject {
             "wakePhrase": "Flow Command, activate", "holdKeyEnabled": true, "sleepAfter": 30,
             "privateMode": false, "askBeforeSend": true, "askBeforePay": true,
             "askBeforeDelete": true, "askBeforePost": true, "sounds": true,
-            "model": "claude-sonnet-5-5",
+            "model": "claude-sonnet-5-5", "brain": "gemini", "geminiModel": "gemini-3.8-flash",
+            "browser": Computer.findApp(named: "google chrome") != nil ? "Google Chrome" : "",
         ])
         onboarded = d.bool(forKey: "onboarded")
-        onboardingStep = d.integer(forKey: "onboardingStep")
+        onboardingStep = d.integer(forKey: "setupStep")
         wakeEnabled = d.bool(forKey: "wakeEnabled")
         wakePhrase = d.string(forKey: "wakePhrase") ?? "Flow Command, activate"
         holdKeyEnabled = d.bool(forKey: "holdKeyEnabled")
@@ -123,7 +130,11 @@ final class AppSettings: ObservableObject {
         askBeforePost = d.bool(forKey: "askBeforePost")
         sounds = d.bool(forKey: "sounds")
         model = d.string(forKey: "model") ?? "claude-sonnet-5-5"
+        brain = d.string(forKey: "brain") ?? "gemini"
+        geminiModel = d.string(forKey: "geminiModel") ?? "gemini-3.8-flash"
+        browser = d.string(forKey: "browser") ?? ""
         hasAPIKey = !(Keychain.get("anthropic") ?? "").isEmpty
+        hasGeminiKey = !(Keychain.get("gemini") ?? "").isEmpty
     }
 
     private func save<T: Encodable>(_ v: T, _ key: String) {
@@ -136,6 +147,19 @@ final class AppSettings: ObservableObject {
             if let v = newValue, !v.isEmpty { Keychain.set(v, account: "anthropic") } else { Keychain.delete("anthropic") }
             hasAPIKey = !(newValue ?? "").isEmpty
         }
+    }
+
+    var geminiKey: String? {
+        get { Keychain.get("gemini") }
+        set {
+            if let v = newValue, !v.isEmpty { Keychain.set(v, account: "gemini") } else { Keychain.delete("gemini") }
+            hasGeminiKey = !(newValue ?? "").isEmpty
+        }
+    }
+
+    /// The browser websites open in, if it's installed.
+    var preferredBrowser: String? {
+        browser.isEmpty || Computer.findApp(named: browser) == nil ? nil : browser
     }
 }
 

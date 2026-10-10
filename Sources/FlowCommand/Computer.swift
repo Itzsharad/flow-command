@@ -57,6 +57,12 @@ final class Computer {
         CGPoint(x: x * scale, y: y * scale)
     }
 
+    /// 0–1000 coordinates on the last screenshot → screen point.
+    func fromNormalized(_ x: Double, _ y: Double) -> CGPoint {
+        let cx = min(1000, max(0, x)), cy = min(1000, max(0, y))
+        return CGPoint(x: cx / 1000 * shotSize.width * scale, y: cy / 1000 * shotSize.height * scale)
+    }
+
     // MARK: Mouse
 
     func currentMouse() -> CGPoint { CGEvent(source: nil)?.location ?? .zero }

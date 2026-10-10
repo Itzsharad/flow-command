@@ -52,6 +52,8 @@ final class Listener: ObservableObject {
     private var engineRunning = false
     private var quickFailures = 0
     private var started = false
+    /// Falls back to Apple's online recognition when on-device speech isn't installed (no Dictation setup needed).
+    private var useServer = false
 
     var pending: String { (carry + " " + current).trimmingCharacters(in: .whitespacesAndNewlines) }
 
@@ -66,7 +68,11 @@ final class Listener: ObservableObject {
         started = true
         recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
         if let r = recognizer, !r.supportsOnDeviceRecognition {
-            problem = "On-device speech isn't ready. Turn on Dictation in System Settings › Keyboard."
+            if settings.privateMode {
+                problem = "On-device speech isn't installed. Turn on Dictation in System Settings › Keyboard, or turn off Private mode."
+            } else {
+                useServer = true
+            }
         }
         ticker = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in self?.tick() }
         reconfigure()
@@ -193,7 +199,7 @@ final class Listener: ObservableObject {
         guard engineRunning, let rec = recognizer, rec.isAvailable else { return }
         let req = SFSpeechAudioBufferRecognitionRequest()
         req.shouldReportPartialResults = true
-        if rec.supportsOnDeviceRecognition { req.requiresOnDeviceRecognition = true }
+        if rec.supportsOnDeviceRecognition && !useServer { req.requiresOnDeviceRecognition = true }
         req.addsPunctuation = false
         req.contextualStrings = [settings.wakePhrase, "Claude", "GoHighLevel", "Attractclient", "ChatGPT", "GitHub"]
         box.set(req)
@@ -211,8 +217,12 @@ final class Listener: ObservableObject {
                 } else {
                     self.quickFailures = 0
                 }
+                if self.quickFailures >= 2, !self.useServer, !self.settings.privateMode {
+                    self.useServer = true          // on-device model missing: switch quietly
+                    self.quickFailures = 0
+                }
                 if self.quickFailures >= 5 {
-                    self.problem = "Speech recognition isn't responding. Check Dictation is on in System Settings › Keyboard, then restart Flow Command."
+                    self.problem = "Speech recognition isn't responding. Check your internet connection, or turn on Dictation in System Settings › Keyboard, then restart Flow Command."
                     return
                 }
                 let delay = self.quickFailures > 0 ? 1.0 * Double(self.quickFailures) : 0

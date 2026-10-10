@@ -111,6 +111,7 @@ struct SettingsView: View {
     @State private var recording = false
     @State private var keyDraft = ""
     @State private var keyMessage: String?
+    @State private var checking = false
     @State private var tick = 0
     @State private var loginOn = SMAppService.mainApp.status == .enabled
     private let timer = Timer.publish(every: 2, on: .main, in: .common).autoconnect()
@@ -160,42 +161,65 @@ struct SettingsView: View {
                 Text("Stop it anytime: say “stop”, press Esc, or click Stop on the panel.").font(.system(size: 13)).foregroundColor(Theme.muted)
             }
 
-            section("AI brain") {
-                row("Private mode (nothing leaves this Mac)") { Toggle44(on: $settings.privateMode) }
-                Text(settings.privateMode
-                     ? "Simple commands only in this version — multi-step tasks are off."
-                     : "Multi-step tasks use Claude. Screenshots of the task are sent to Anthropic; billed to your API account.")
-                    .font(.system(size: 13)).foregroundColor(Theme.muted)
+            section("Websites") {
+                row("Open websites in") {
+                    Picker("", selection: $settings.browser) {
+                        ForEach(SettingsView.browsers, id: \.self) { b in
+                            if b.isEmpty || Computer.findApp(named: b) != nil { Text(b.isEmpty ? "My default browser" : b).tag(b) }
+                        }
+                    }.labelsHidden().frame(width: 220)
+                }
+                Text("“Open Claude” opens claude.ai here. Say “open Claude app” for the desktop app.").font(.system(size: 13)).foregroundColor(Theme.muted)
+            }
+
+            section("AI brain — for bigger tasks") {
+                Text("Simple commands and chains (“open Chrome, go to claude.ai, type hello and press enter”) always run instantly on your Mac, free. The AI brain is only used for tasks that need to look at the screen.")
+                    .font(.system(size: 13)).foregroundColor(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                row("Private mode (no AI, nothing leaves this Mac)") { Toggle44(on: $settings.privateMode) }
                 if !settings.privateMode {
-                    HStack(spacing: 8) {
-                        SecureField(settings.hasAPIKey ? "Key saved — paste a new one to replace" : "Anthropic API key", text: $keyDraft).textFieldStyle(.roundedBorder)
-                        Button("Save") {
-                            let key = keyDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-                            Task {
-                                let err = await ClaudeClient.verify(key: key, model: settings.model)
-                                await MainActor.run {
-                                    if let err = err { keyMessage = err } else { settings.apiKey = key; keyDraft = ""; keyMessage = "✓ Saved" }
-                                }
-                            }
-                        }.disabled(keyDraft.isEmpty)
-                        if settings.hasAPIKey { Button("Remove") { settings.apiKey = nil; keyMessage = "Removed" } }
+                    Picker("", selection: $settings.brain) {
+                        Text("Free — Google Gemini").tag("gemini")
+                        Text("Claude — paid, most capable").tag("claude")
+                    }.pickerStyle(.segmented).labelsHidden().frame(maxWidth: 420)
+
+                    if settings.brain == "gemini" {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Get your free key (2 minutes, no card):").font(.system(size: 13, weight: .semibold))
+                            Text("1. Open aistudio.google.com/apikey and sign in with Google\n2. Click “Create API key” and copy it\n3. Paste it below and click Save")
+                                .font(.system(size: 13)).foregroundColor(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                            Link("Open Google AI Studio →", destination: URL(string: "https://aistudio.google.com/apikey")!).font(.system(size: 13))
+                        }
+                        keyRow(saved: settings.hasGeminiKey, placeholder: "Google AI key (AIza…)") { key in
+                            let err = await GeminiClient.verify(key: key, model: settings.geminiModel)
+                            if err == nil { await MainActor.run { settings.geminiKey = key } }
+                            return err
+                        } remove: { settings.geminiKey = nil }
+                        Text("Free tier: limited requests per minute, and Google may use free-tier requests (including screenshots of the task) to improve its products — avoid using it on screens with sensitive information, or switch to Claude.")
+                            .font(.system(size: 12)).foregroundColor(Theme.faint).fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        keyRow(saved: settings.hasAPIKey, placeholder: "Anthropic API key (sk-ant-…)") { key in
+                            let err = await ClaudeClient.verify(key: key, model: settings.model)
+                            if err == nil { await MainActor.run { settings.apiKey = key } }
+                            return err
+                        } remove: { settings.apiKey = nil }
+                        row("Model") {
+                            Picker("", selection: $settings.model) {
+                                Text("Sonnet 5.5 — fast (recommended)").tag("claude-sonnet-5-5")
+                                Text("Opus 5.5 — most capable").tag("claude-opus-5-5")
+                                Text("Haiku 5.5 — cheapest").tag("claude-haiku-5-5")
+                            }.labelsHidden().frame(width: 280)
+                        }
+                        Text("Billed per task to your Anthropic account. Screenshots of the task are sent to Anthropic.").font(.system(size: 12)).foregroundColor(Theme.faint)
                     }
-                    if let m = keyMessage { Text(m).font(.system(size: 12)).foregroundColor(m.hasPrefix("✓") ? Theme.success : Theme.muted) }
-                    row("Model") {
-                        Picker("", selection: $settings.model) {
-                            Text("Sonnet 5.5 — fast (recommended)").tag("claude-sonnet-5-5")
-                            Text("Opus 5.5 — most capable").tag("claude-opus-5-5")
-                            Text("Haiku 5.5 — cheapest").tag("claude-haiku-5-5")
-                        }.labelsHidden().frame(width: 280)
-                    }
+                    if let m = keyMessage { Text(m).font(.system(size: 12)).foregroundColor(m.hasPrefix("✓") ? Theme.success : Theme.danger) }
                 }
             }
 
             section("Permissions") {
                 let _ = tick
                 permRow("Microphone & speech", Permissions.microphone && Permissions.speech) { Permissions.open(.microphone) }
-                permRow("See your screen", Permissions.screen) { Permissions.requestScreen(); Permissions.open(.screen) }
-                permRow("Click and type", Permissions.control) { Permissions.requestControl() }
+                permRow("See your screen (only for AI tasks)", Permissions.screen) { Permissions.requestScreen(); Permissions.open(.screen) }
+                permRow("Click and type", Permissions.control) { Permissions.requestControl(); Permissions.open(.accessibility) }
             }
 
             section("General") {
@@ -216,6 +240,26 @@ struct SettingsView: View {
         .onReceive(timer) { _ in tick += 1 }
         .onChange(of: settings.wakeEnabled) { _ in Listener.shared.reconfigure() }
         .onChange(of: settings.holdKeyEnabled) { _ in Listener.shared.reconfigure() }
+    }
+
+    static let browsers = ["Google Chrome", "Safari", "Arc", "Brave Browser", "Microsoft Edge", "Firefox", ""]
+
+    private func keyRow(saved: Bool, placeholder: String, save: @escaping (String) async -> String?, remove: @escaping () -> Void) -> some View {
+        HStack(spacing: 8) {
+            SecureField(saved ? "Key saved ✓ — paste a new one to replace" : placeholder, text: $keyDraft).textFieldStyle(.roundedBorder)
+            Button(checking ? "Checking…" : "Save") {
+                let key = keyDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+                checking = true
+                Task {
+                    let err = await save(key)
+                    await MainActor.run {
+                        checking = false
+                        if let err = err { keyMessage = err } else { keyDraft = ""; keyMessage = "✓ Key works — saved in your Keychain" }
+                    }
+                }
+            }.disabled(keyDraft.isEmpty || checking)
+            if saved { Button("Remove") { remove(); keyMessage = "Removed" } }
+        }
     }
 
     private func section<C: View>(_ title: String, @ViewBuilder _ c: () -> C) -> some View {

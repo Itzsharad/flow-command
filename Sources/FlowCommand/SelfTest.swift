@@ -11,7 +11,7 @@ enum SelfTest {
     }
 
     static func run() -> Int32 {
-        let exists: (String) -> Bool = { ["safari", "google chrome", "chrome", "notes"].contains($0) }
+        let exists: (String) -> Bool = { ["safari", "google chrome", "chrome", "notes", "claude"].contains($0) }
 
         // Local intents
         check(LocalIntents.parse("Open Safari", appExists: exists) == .openApp("safari"), "open app")
@@ -25,6 +25,23 @@ enum SelfTest {
         check(LocalIntents.parse("open chrome and go to claude.ai", appExists: exists) == nil, "multi-step goes to AI")
         check(LocalIntents.parse("open my crm thing", appExists: exists) == nil, "unknown app goes to AI")
         check(LocalIntents.parse("sign up on GitHub", appExists: exists) == nil, "task goes to AI")
+
+        // Websites vs apps, and chains that run without any AI
+        check(LocalIntents.parse("open Claude", appExists: exists) == .openURL("claude.ai"), "claude opens the website")
+        check(LocalIntents.parse("open cloud", appExists: exists) == .openURL("claude.ai"), "misheard cloud = claude")
+        check(LocalIntents.parse("open the Claude app", appExists: exists) == .openApp("claude"), "claude app opens the app")
+        check(LocalIntents.parseChain("Open Chrome, go to claude.ai, type Hello there and press enter", appExists: exists) ==
+              [.openApp("chrome"), .openURL("claude.ai"), .type("Hello there"), .keys("Return", label: "Press Enter")], "chain")
+        check(LocalIntents.parseChain("open chrome and open a new tab", appExists: exists) ==
+              [.openApp("chrome"), .keys("cmd+t", label: "New tab")], "chain with and")
+        check(LocalIntents.parseChain("type milk and eggs", appExists: exists) == [.type("milk and eggs")], "typed text keeps its 'and'")
+        check(LocalIntents.parseChain("open GoHighLevel and switch to the Attractclient account", appExists: exists) == nil, "screen task goes to AI")
+
+        // Free brain replies
+        check(GeminiClient.parseAction("```json\n{\"action\": \"click\", \"x\": 500, \"y\": 250}\n```")?["action"] as? String == "click", "gemini json in fences")
+        check(GeminiClient.parseAction("I think we should click") == nil, "gemini non-json rejected")
+        let p = Computer.shared.fromNormalized(500, 500)
+        check(abs(p.x - 683) < 1 && abs(p.y - 427) < 1, "0-1000 coordinates map to the screen")
 
         // Wake phrase
         check(WakeMatcher.match("flow command activate", phrase: "Flow Command, activate") == [], "wake exact")

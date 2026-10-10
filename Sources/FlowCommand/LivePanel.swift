@@ -163,12 +163,20 @@ struct LivePanelView: View {
     }
 
     private var finished: some View {
-        HStack(alignment: .top, spacing: 12) {
-            ZStack {
-                Circle().fill(agent.phase == .done ? Theme.success : Theme.warn).frame(width: 28, height: 28)
-                Image(systemName: agent.phase == .done ? "checkmark" : "exclamationmark").font(.system(size: 13, weight: .bold))
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                ZStack {
+                    Circle().fill(agent.phase == .done ? Theme.success : Theme.warn).frame(width: 28, height: 28)
+                    Image(systemName: agent.phase == .done ? "checkmark" : "exclamationmark").font(.system(size: 13, weight: .bold))
+                }
+                Text(agent.result).font(.system(size: 15)).fixedSize(horizontal: false, vertical: true)
             }
-            Text(agent.result).font(.system(size: 15)).fixedSize(horizontal: false, vertical: true)
+            if let fix = agent.fix {
+                Button(action: { fix.perform() }) {
+                    Text(fix.title).font(.system(size: 14, weight: .semibold)).frame(maxWidth: .infinity).frame(height: 38)
+                        .background(RoundedRectangle(cornerRadius: 11).fill(Theme.accent))
+                }.buttonStyle(.plain)
+            }
         }
     }
 }
