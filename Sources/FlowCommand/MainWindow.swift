@@ -393,7 +393,7 @@ struct SettingsView: View {
                     .font(.system(size: 12)).foregroundColor(Theme.faint)
             }
             if account.plan == .trial {
-                Text("You have everything in Pro during your trial. After it, Free gives you \(Account.freeWeekly) AI tasks a week, \(Account.freeRoutines) routines and 4 buddies and worlds.")
+                Text("You have everything in Pro during your trial (7 days or 30 AI tasks). After it, Free gives you \(Account.freeWeekly) AI tasks a week, \(Account.freeRoutines) routines and 4 buddies and worlds.")
                     .font(.system(size: 12)).foregroundColor(Theme.faint).fixedSize(horizontal: false, vertical: true)
             }
             if account.hasLicense {

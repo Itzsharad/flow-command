@@ -23,3 +23,7 @@ CREATE TABLE IF NOT EXISTS activations (
   instance_id TEXT NOT NULL,
   PRIMARY KEY (key, device)
 );
+CREATE TABLE IF NOT EXISTS daily (
+  day TEXT PRIMARY KEY,           -- total AI steps across everyone, for the daily spending cap
+  calls INTEGER NOT NULL DEFAULT 0
+);

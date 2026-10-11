@@ -7,7 +7,8 @@
 const GEMINI = 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions';
 const LS = 'https://api.lemonsqueezy.com/v1/licenses';
 const CALLS_PER_TASK = 45;     // one task = up to this many AI steps
-const PRO_DAILY_TASKS = 200;   // fair use
+const PRO_DAILY_TASKS = 60;    // fair use: no normal person reaches this
+const TRIAL_TASKS = 30;        // the trial ends after 7 days or 30 AI tasks, whichever comes first
 const LICENSE_RECHECK = 6 * 3600;
 
 const json = (obj, status = 200, headers = {}) =>
@@ -73,23 +74,28 @@ async function licenseActive(env, key, dev) {
 async function account(env, devId) {
   const dev = await device(env, devId);
   const t = now();
-  const trialEnds = dev.first_seen + Number(env.TRIAL_DAYS || 14) * 86400;
-  let plan = 'free';
+  const trialEnds = dev.first_seen + Number(env.TRIAL_DAYS || 7) * 86400;
+  let plan = 'free', trialLeft = null;
   if (await licenseActive(env, dev.license, devId)) plan = 'pro';
-  else if (t < trialEnds) plan = 'trial';
+  else if (t < trialEnds) {
+    const total = (await env.DB.prepare('SELECT COUNT(*) AS n FROM tasks WHERE device = ?').bind(devId).first()).n;
+    trialLeft = Math.max(0, Number(env.TRIAL_TASKS || TRIAL_TASKS) - total);
+    if (trialLeft > 0) plan = 'trial';
+  }
   const week = weekOf(t);
   const used = (await env.DB.prepare('SELECT COUNT(*) AS n FROM tasks WHERE device = ? AND week = ?').bind(devId, week).first()).n;
   const limit = plan === 'free' ? Number(env.FREE_WEEKLY || 15) : null;
-  return { plan, used, limit, resetsAt: nextWeek(t), trialEndsAt: plan === 'pro' ? null : trialEnds, week };
+  return { plan, used, limit, resetsAt: nextWeek(t), trialEndsAt: plan === 'pro' ? null : trialEnds, trialLeft: plan === 'trial' ? trialLeft : null, week };
 }
 
 function accountHeaders(a) {
   return {
     'x-fc-plan': a.plan, 'x-fc-used': String(a.used), 'x-fc-limit': a.limit == null ? '' : String(a.limit),
     'x-fc-resets': String(a.resetsAt), 'x-fc-trial-ends': a.trialEndsAt == null ? '' : String(a.trialEndsAt),
+    'x-fc-trial-left': a.trialLeft == null ? '' : String(a.trialLeft),
   };
 }
-const publicAccount = (a) => ({ plan: a.plan, used: a.used, limit: a.limit, resetsAt: a.resetsAt, trialEndsAt: a.trialEndsAt });
+const publicAccount = (a) => ({ plan: a.plan, used: a.used, limit: a.limit, resetsAt: a.resetsAt, trialEndsAt: a.trialEndsAt, trialLeft: a.trialLeft });
 
 async function handleAI(req, env) {
   const devId = req.headers.get('x-fc-device'), task = req.headers.get('x-fc-task');
@@ -110,6 +116,15 @@ async function handleAI(req, env) {
     return fail(429, 'too_many_steps', 'This task took too many steps, so I stopped it. Try saying it in smaller parts.', accountHeaders(a));
   }
 
+  // Daily spending cap: when the day's AI use passes DAILY_CALL_CAP, only paying users are served.
+  const cap = Number(env.DAILY_CALL_CAP || 0);
+  if (cap > 0 && a.plan !== 'pro') {
+    const row = await env.DB.prepare('SELECT calls FROM daily WHERE day = ?').bind(dayOf(now())).first();
+    if (row && row.calls >= cap) {
+      return fail(503, 'busy', "Flow Command's AI is very busy today. Instant commands still work; AI tasks will be back soon. Pro members always get through.", accountHeaders(a));
+    }
+  }
+
   // Only the fields the app uses are forwarded; the model is chosen here, not by the app.
   const out = { model: env.MODEL || 'gemini-3.8-flash', messages: body.messages };
   if (typeof body.temperature === 'number') out.temperature = body.temperature;
@@ -125,7 +140,8 @@ async function handleAI(req, env) {
   if (upstream.ok) {
     await env.DB.prepare('INSERT INTO tasks (device, week, day, task_id, calls) VALUES (?, ?, ?, ?, 1) ON CONFLICT(device, week, task_id) DO UPDATE SET calls = calls + 1')
       .bind(devId, a.week, dayOf(now()), task).run();
-    if (!existing) a.used += 1;
+    await env.DB.prepare('INSERT INTO daily (day, calls) VALUES (?, 1) ON CONFLICT(day) DO UPDATE SET calls = calls + 1').bind(dayOf(now())).run();
+    if (!existing) { a.used += 1; if (a.trialLeft != null) a.trialLeft = Math.max(0, a.trialLeft - 1); }
   }
   const status = upstream.ok ? 200 : (upstream.status === 429 ? 503 : 502);
   if (!upstream.ok) return fail(status, 'ai_busy', upstream.status === 429 ? 'The AI is busy right now. Try again in a minute.' : 'The AI had a problem. Try again.', accountHeaders(a));

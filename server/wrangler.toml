@@ -6,7 +6,10 @@ workers_dev = true
 [vars]
 MODEL = "gemini-3.8-flash"
 FREE_WEEKLY = "15"
-TRIAL_DAYS = "14"
+TRIAL_DAYS = "7"
+TRIAL_TASKS = "30"
+# Daily spending cap: about 4,000 AI steps (~$15–20 of AI). Free and trial users wait when it's reached; Pro never does.
+DAILY_CALL_CAP = "4000"
 # LS_STORE_ID = ""   # your Lemon Squeezy store id (only licenses from your store are accepted)
 
 [[d1_databases]]

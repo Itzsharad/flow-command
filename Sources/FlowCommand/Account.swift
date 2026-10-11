@@ -3,7 +3,7 @@ import CryptoKit
 import Foundation
 import IOKit
 
-/// Your plan: a 14-day Pro trial, then Free (15 AI tasks a week) or Pro (unlimited).
+/// Your plan: a Pro trial (7 days or 30 AI tasks), then Free (15 AI tasks a week) or Pro (unlimited).
 /// The usage server keeps the count, so reinstalling doesn't reset it. Nothing you say or see is sent to it — only counts.
 final class Account: ObservableObject {
     static let shared = Account()
@@ -16,6 +16,7 @@ final class Account: ObservableObject {
     @Published private(set) var trialEndsAt: Date?
     @Published private(set) var resetsAt: Date?
     @Published private(set) var hasLicense = false
+    @Published private(set) var trialLeft: Int?
 
     static let freeWeekly = 15
     static let freeRoutines = 3
@@ -55,15 +56,17 @@ final class Account: ObservableObject {
     static func styleAllowed(_ key: String, pro: Bool) -> Bool { pro || freeStyles.contains(key) }
     var lockedStyles: [String] { isPro ? [] : PanelHTML.styles.map(\.key).filter { !Account.freeStyles.contains($0) } }
 
-    var summary: String { Account.summary(plan: plan, used: used, limit: limit, trialEndsAt: trialEndsAt, serverEnabled: Account.serverEnabled) }
+    var summary: String { Account.summary(plan: plan, used: used, limit: limit, trialEndsAt: trialEndsAt, serverEnabled: Account.serverEnabled, trialLeft: trialLeft) }
 
-    static func summary(plan: Plan, used: Int, limit: Int?, trialEndsAt: Date?, serverEnabled: Bool, now: Date = Date()) -> String {
+    static func summary(plan: Plan, used: Int, limit: Int?, trialEndsAt: Date?, serverEnabled: Bool, trialLeft: Int? = nil, now: Date = Date()) -> String {
         guard serverEnabled else { return "Unlimited (setup mode)" }
         switch plan {
         case .pro: return "Pro: unlimited AI tasks"
         case .trial:
             let days = max(1, Int(ceil((trialEndsAt ?? now).timeIntervalSince(now) / 86400)))
-            return "Pro trial: \(days) day\(days == 1 ? "" : "s") left"
+            let d = "\(days) day\(days == 1 ? "" : "s")"
+            if let t = trialLeft { return "Pro trial: \(d) or \(t) AI task\(t == 1 ? "" : "s") left" }
+            return "Pro trial: \(d) left"
         case .free:
             let l = limit ?? freeWeekly
             return "\(max(0, l - used)) of \(l) free AI tasks left this week"
@@ -146,7 +149,7 @@ final class Account: ObservableObject {
         let l = (obj["limit"] as? NSNumber)?.intValue
         let t = (obj["trialEndsAt"] as? NSNumber)?.doubleValue
         let r = (obj["resetsAt"] as? NSNumber)?.doubleValue
-        set(plan: p, used: u, limit: l, trial: t, resets: r)
+        set(plan: p, used: u, limit: l, trial: t, resets: r, trialLeft: (obj["trialLeft"] as? NSNumber)?.intValue)
     }
 
     /// The server also reports the plan on every AI reply.
@@ -154,12 +157,12 @@ final class Account: ObservableObject {
         guard let p = http.value(forHTTPHeaderField: "x-fc-plan"), let plan = Plan(rawValue: p) else { return }
         let num: (String) -> Double? = { Double(http.value(forHTTPHeaderField: $0) ?? "") }
         set(plan: plan, used: Int(num("x-fc-used") ?? 0), limit: num("x-fc-limit").map { Int($0) },
-            trial: num("x-fc-trial-ends"), resets: num("x-fc-resets"))
+            trial: num("x-fc-trial-ends"), resets: num("x-fc-resets"), trialLeft: num("x-fc-trial-left").map { Int($0) })
     }
 
-    private func set(plan p: Plan, used u: Int, limit l: Int?, trial t: Double?, resets r: Double?) {
+    private func set(plan p: Plan, used u: Int, limit l: Int?, trial t: Double?, resets r: Double?, trialLeft tl: Int? = nil) {
         onMain {
-            self.plan = p; self.used = u; self.limit = l
+            self.plan = p; self.used = u; self.limit = l; self.trialLeft = tl
             self.trialEndsAt = t.map { Date(timeIntervalSince1970: $0) }
             self.resetsAt = r.map { Date(timeIntervalSince1970: $0) }
             self.d.set(p.rawValue, forKey: "plan"); self.d.set(u, forKey: "planUsed")

@@ -143,6 +143,7 @@ enum SelfTest {
         // Plans
         let soon = Date().addingTimeInterval(9 * 86400 - 60)
         check(Account.summary(plan: .trial, used: 0, limit: nil, trialEndsAt: soon, serverEnabled: true) == "Pro trial: 9 days left", "trial summary")
+        check(Account.summary(plan: .trial, used: 0, limit: nil, trialEndsAt: soon, serverEnabled: true, trialLeft: 22) == "Pro trial: 9 days or 22 AI tasks left", "trial summary with tasks")
         check(Account.summary(plan: .free, used: 4, limit: 15, trialEndsAt: nil, serverEnabled: true) == "11 of 15 free AI tasks left this week", "free summary")
         check(Account.summary(plan: .pro, used: 99, limit: nil, trialEndsAt: nil, serverEnabled: true).hasPrefix("Pro"), "pro summary")
         check(Account.styleAllowed("kitty", pro: false) && !Account.styleAllowed("dragon", pro: false) && Account.styleAllowed("dragon", pro: true), "free styles")
