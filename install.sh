@@ -17,4 +17,5 @@ hdiutil detach "$MNT" -quiet || true
 rm -rf "$TMP"
 xattr -dr com.apple.quarantine /Applications/FlowCommand.app 2>/dev/null || true
 echo "✓ Installed. Opening Flow Command…"
-open /Applications/FlowCommand.app
+echo "  Look for the microphone icon at the top-right of your screen."
+open /Applications/FlowCommand.app --args --welcome

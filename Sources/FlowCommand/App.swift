@@ -50,6 +50,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillFinishLaunching(_ notification: Notification) {
+        AppDelegate.launchedAtLogin = AppDelegate.readLoginLaunch()
         // Only one copy may ever run.
         if !SingleInstance.acquire() {
             if let other = NSRunningApplication.runningApplications(withBundleIdentifier: Bundle.main.bundleIdentifier ?? "")
@@ -73,9 +74,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if s.onboarded {
             startServices()
+            // Opened by you (installer, Finder, Spotlight) — not at login: show the window so you know it's running.
+            if CommandLine.arguments.contains("--welcome") || !AppDelegate.launchedAtLogin { showMain() }
         } else {
             showOnboarding()
         }
+    }
+
+    /// Clicking the app again in Finder, Spotlight or Launchpad while it's running opens its window.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if AppSettings.shared.onboarded { showMain() } else { showOnboarding() }
+        return true
+    }
+
+    /// macOS marks apps it starts at login; anything else was opened by the person.
+    static var launchedAtLogin = false
+    private static func readLoginLaunch() -> Bool {
+        guard let event = NSAppleEventManager.shared().currentAppleEvent else { return false }
+        return event.eventID == kAEOpenApplication &&
+            event.paramDescriptor(forKeyword: keyAEPropData)?.enumCodeValue == keyAELaunchedAsLogInItem
     }
 
     /// Start listening and watching for the hotkey. Only ever called after setup (or on its "Try it" step).
