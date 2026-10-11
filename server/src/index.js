@@ -131,11 +131,18 @@ async function handleAI(req, env) {
   if (typeof body.max_tokens === 'number') out.max_tokens = Math.min(body.max_tokens, 2000);
   if (!Array.isArray(out.messages) || out.messages.length > 20) return fail(400, 'bad_request', 'Bad request.');
 
-  const upstream = await fetch(env.UPSTREAM || GEMINI, {
+  const call = (model) => fetch(env.UPSTREAM || GEMINI, {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${env.GEMINI_KEY}` },
-    body: JSON.stringify(out),
+    body: JSON.stringify({ ...out, model }),
   });
+  // Google sometimes says a model is busy: wait a moment, retry, then use the fallback model.
+  let upstream = await call(out.model);
+  for (const model of [out.model, env.FALLBACK_MODEL || 'gemini-flash-latest']) {
+    if (![429, 500, 503].includes(upstream.status)) break;
+    await new Promise((r) => setTimeout(r, 1200));
+    upstream = await call(model);
+  }
   const text = await upstream.text();
   if (upstream.ok) {
     await env.DB.prepare('INSERT INTO tasks (device, week, day, task_id, calls) VALUES (?, ?, ?, ?, 1) ON CONFLICT(device, week, task_id) DO UPDATE SET calls = calls + 1')

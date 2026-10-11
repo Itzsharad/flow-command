@@ -35,7 +35,69 @@ struct GeminiClient {
         }
     }
 
+    /// Sends a request. When Google says it's busy (503/500/429), waits and tries again,
+    /// then switches to another Flash model that's available on the key — so a busy model doesn't stop the task.
     private func request(_ body: [String: Any], timeout: TimeInterval = 60) async throws -> [String: Any] {
+        var models: [String] = [body["model"] as? String ?? model]
+        var lastError: Error = GeminiError.badReply
+        var triedFallbacks = false
+        var i = 0
+        while i < models.count {
+            var b = body
+            b["model"] = models[i]
+            for attempt in 0..<3 {
+                do {
+                    let obj = try await send(b, timeout: timeout)
+                    if i > 0 { Log.write("AI: \(models[0]) busy, used \(models[i])") }
+                    return obj
+                } catch GeminiError.http(let code, let msg) where [429, 500, 503].contains(code) {
+                    lastError = GeminiError.http(code, msg)
+                    Log.write("AI busy (\(code)) on \(models[i]), attempt \(attempt + 1)")
+                    if Task.isCancelled { throw lastError }
+                    try? await Task.sleep(nanoseconds: UInt64([1.2, 2.5, 0][attempt] * 1_000_000_000))
+                } catch GeminiError.limit(let msg) where msg.contains("busy") {
+                    lastError = GeminiError.limit(msg)
+                    try? await Task.sleep(nanoseconds: UInt64([1.5, 3.0, 0][attempt] * 1_000_000_000))
+                }
+            }
+            // still busy: try other Flash models on this key (only with your own key; the server picks its own)
+            if !triedFallbacks, extraHeaders.isEmpty {
+                triedFallbacks = true
+                models += await GeminiClient.fallbackModels(key: apiKey, excluding: models[0])
+            }
+            i += 1
+        }
+        if case GeminiError.http(let code, _) = lastError, [429, 500, 503].contains(code) {
+            throw GeminiError.limit(code == 429
+                ? "Google's free AI limit is used up for the moment. Wait a minute and try again."
+                : "Google's AI is very busy right now. I tried a few times and other models too. Try again in a minute.")
+        }
+        throw lastError
+    }
+
+    private static var cachedFallbacks: [String]?
+    /// Other Flash models this key can use, newest first (asked from Google once).
+    static func fallbackModels(key: String, excluding: String) async -> [String] {
+        if let c = cachedFallbacks { return c.filter { $0 != excluding } }
+        var found: [String] = []
+        if let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/openai/models") {
+            var req = URLRequest(url: url)
+            req.timeoutInterval = 10
+            req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+            if let (data, _) = try? await URLSession.shared.data(for: req),
+               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let list = obj["data"] as? [[String: Any]] {
+                found = list.compactMap { ($0["id"] as? String)?.replacingOccurrences(of: "models/", with: "") }
+                    .filter { $0.contains("flash") && !$0.contains("image") && !$0.contains("tts") && !$0.contains("audio") && !$0.contains("live") }
+                    .sorted(by: >)
+            }
+        }
+        if found.isEmpty { found = ["gemini-flash-latest", "gemini-flash-lite-latest"] }
+        cachedFallbacks = Array(found.prefix(3))
+        return cachedFallbacks!.filter { $0 != excluding }
+    }
+
+    private func send(_ body: [String: Any], timeout: TimeInterval) async throws -> [String: Any] {
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.timeoutInterval = timeout
