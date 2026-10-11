@@ -508,6 +508,7 @@ struct MenuBarView: View {
             if agent.isBusy { Button("Stop current task") { agent.stop() } }
             Divider()
             Button("Open Flow Command…") { AppDelegate.shared?.showMain() }
+            Button("Copy diagnostics (for support)") { Log.copyDiagnostics() }
             Button("Quit Flow Command") { NSApp.terminate(nil) }
         }
         .buttonStyle(.plain)

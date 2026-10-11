@@ -110,6 +110,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             //  • otherwise → hold to talk, let go to send
             var swallowRelease = false
             keys.onHoldDown = {
+                Log.write("key down · busy=\(agent.isBusy) mode=\(listener.mode)")
                 if agent.isBusy {
                     agent.stop(); listener.sleep(); swallowRelease = true
                 } else if listener.mode == .awake {
@@ -127,6 +128,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         listener.start()
+        Log.write("services start · control=\(Permissions.control) holdKey=\(AppSettings.shared.holdKeyEnabled) \(AppSettings.shared.holdKey.label)")
         if Permissions.control { keys.start() }
         Transcriber.shared.prepare()   // downloads the accent-accurate speech model once, in the background
         Task { await Account.shared.refresh() }

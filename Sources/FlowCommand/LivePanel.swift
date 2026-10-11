@@ -56,8 +56,22 @@ final class LivePanelController: NSObject, WKScriptMessageHandler, WKNavigationD
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        Log.write("pop-up ready")
         ready = true
         scheduleRender()
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        Log.write("pop-up failed: \(error.localizedDescription)")
+    }
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        Log.write("pop-up failed to load: \(error.localizedDescription)")
+    }
+    /// If the page's helper process dies, load it again so the pop-up never stays invisible.
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        Log.write("pop-up process ended; reloading")
+        ready = false
+        webView.loadHTMLString(PanelHTML.page(mode: "live", buddy: Account.shared.allowedStyle(AppSettings.shared.popupStyle)), baseURL: nil)
     }
 
     /// Many changes arrive at once (the microphone level updates constantly) — draw at most ~20 times a second.
@@ -122,9 +136,10 @@ final class LivePanelController: NSObject, WKScriptMessageHandler, WKNavigationD
         }
         return [
             "phase": phase, "title": title, "live": l.live, "instruction": a.instruction,
+            // (NaN would crash the JSON encoder)
             "steps": steps, "status": a.status, "question": a.question, "result": a.result,
-            "fix": a.fix?.title ?? "", "level": Double(l.level),
-            "elapsed": Date().timeIntervalSince(a.startedAt),
+            "fix": a.fix?.title ?? "", "level": l.level.isFinite ? Double(max(0, min(1, l.level))) : 0,
+            "elapsed": max(0, Date().timeIntervalSince(a.startedAt)),
             "holdKey": s.holdKeyEnabled ? s.holdKey.label : "Esc",
             "buddy": Account.shared.allowedStyle(s.popupStyle),
         ]

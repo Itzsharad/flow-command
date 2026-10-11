@@ -65,12 +65,14 @@ final class Listener: ObservableObject {
 
     func start() {
         guard !started else { reconfigure(); return }
+        Log.write("listener start · mic=\(Permissions.microphone) speech=\(Permissions.speech)")
         guard Permissions.microphone, Permissions.speech else {
             problem = "Microphone or speech permission is off."
             return
         }
         started = true
         recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
+        Log.write("recognizer available=\(recognizer?.isAvailable ?? false) onDevice=\(recognizer?.supportsOnDeviceRecognition ?? false)")
         if let r = recognizer, !r.supportsOnDeviceRecognition {
             if settings.privateMode {
                 problem = "On-device speech isn't installed. Turn on Dictation in System Settings › Keyboard, or turn off Private mode."
@@ -135,6 +137,7 @@ final class Listener: ObservableObject {
     }
 
     func holdBegan() {
+        Log.write("hold began · started=\(started) mode=\(mode)")
         guard started, mode != .holding else { return }
         if !engineRunning { startEngine() }
         carry = ""; live = ""
@@ -148,6 +151,7 @@ final class Listener: ObservableObject {
     }
 
     func holdEnded() {
+        Log.write("hold ended · heard \(pending.count) chars")
         guard mode == .holding else { return }
         // give the recogniser a moment to finish the last word
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
@@ -163,6 +167,7 @@ final class Listener: ObservableObject {
         guard !engineRunning else { return }
         let input = engine.inputNode
         let format = input.outputFormat(forBus: 0)
+        Log.write("mic format \(format.sampleRate)Hz \(format.channelCount)ch")
         guard format.sampleRate > 0, format.channelCount > 0 else {
             problem = "No microphone found."
             return
@@ -185,10 +190,12 @@ final class Listener: ObservableObject {
         do {
             try engine.start()
             engineRunning = true
+            Log.write("mic running")
             restartRecognition()
         } catch {
             input.removeTap(onBus: 0)
             problem = "Couldn't start the microphone: \(error.localizedDescription)"
+            Log.write("mic start failed: \(error.localizedDescription)")
         }
     }
 
@@ -206,7 +213,10 @@ final class Listener: ObservableObject {
         current = ""
         generation += 1
         let gen = generation
-        guard engineRunning, let rec = recognizer, rec.isAvailable else { return }
+        guard engineRunning, let rec = recognizer, rec.isAvailable else {
+            Log.write("recognition not started · engine=\(engineRunning) available=\(recognizer?.isAvailable ?? false)")
+            return
+        }
         let req = SFSpeechAudioBufferRecognitionRequest()
         req.shouldReportPartialResults = true
         if rec.supportsOnDeviceRecognition && !useServer { req.requiresOnDeviceRecognition = true }
@@ -220,6 +230,7 @@ final class Listener: ObservableObject {
                 if let result = result { self.heard(result.bestTranscription.formattedString) }
                 let ended = error != nil || (result?.isFinal ?? false)
                 guard ended else { return }
+                if let e = error as NSError? { Log.write("recognition ended: \(e.domain) \(e.code) \(e.localizedDescription) · server=\(self.useServer)") }
                 if self.mode == .awake || self.mode == .holding { self.carry = self.pending; self.current = "" }
                 // Back off if the recogniser keeps failing straight away (never spin).
                 if Date().timeIntervalSince(self.taskStarted) < 1.5 {
@@ -254,6 +265,7 @@ final class Listener: ObservableObject {
         switch mode {
         case .asleep:
             if let rest = WakeMatcher.match(text, phrase: settings.wakePhrase) {
+                Log.write("wake phrase heard")
                 let carried = rest.joined(separator: " ")
                 wakeNow()
                 if !carried.isEmpty {
@@ -301,6 +313,7 @@ final class Listener: ObservableObject {
 
     private func submit() {
         let p = pending
+        Log.write("submit · \(p.count) chars, whisper ready=\(Transcriber.shared.isReady)")
         let whisper = Transcriber.shared
         let audio = whisper.isReady ? whisper.samples(from: audioMark) : []
         let hadWake = audioHasWakePhrase
