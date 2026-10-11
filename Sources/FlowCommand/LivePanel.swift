@@ -45,7 +45,7 @@ final class LivePanelController: NSObject, WKScriptMessageHandler, WKNavigationD
         panel = p
         web = w
 
-        Agent.shared.objectWillChange.merge(with: Listener.shared.objectWillChange, AppSettings.shared.objectWillChange)
+        Agent.shared.objectWillChange.merge(with: Listener.shared.objectWillChange, AppSettings.shared.objectWillChange, Account.shared.objectWillChange)
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.scheduleRender() }
             .store(in: &bag)
@@ -126,7 +126,7 @@ final class LivePanelController: NSObject, WKScriptMessageHandler, WKNavigationD
             "fix": a.fix?.title ?? "", "level": Double(l.level),
             "elapsed": Date().timeIntervalSince(a.startedAt),
             "holdKey": s.holdKeyEnabled ? s.holdKey.label : "Esc",
-            "buddy": s.popupStyle,
+            "buddy": Account.shared.allowedStyle(s.popupStyle),
         ]
     }
 
@@ -156,9 +156,18 @@ struct PopupStylePreview: NSViewRepresentable {
 
     final class Coordinator: NSObject, WKScriptMessageHandler {
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-            guard let body = message.body as? [String: Any], body["action"] as? String == "buddy",
-                  let key = body["key"] as? String, PanelHTML.styles.contains(where: { $0.key == key }) else { return }
-            AppSettings.shared.popupStyle = key
+            guard let body = message.body as? [String: Any], let action = body["action"] as? String,
+                  let key = body["key"] as? String, let style = PanelHTML.styles.first(where: { $0.key == key }) else { return }
+            if action == "buddy" { AppSettings.shared.popupStyle = key; return }
+            guard action == "locked" else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                let alert = NSAlert()
+                alert.messageText = "\(style.name) comes with Pro"
+                alert.informativeText = "Free includes Classic, Kitty, Pup and Galaxy. Pro unlocks every buddy and world, plus unlimited AI tasks and routines."
+                alert.addButton(withTitle: "Upgrade to Pro")
+                alert.addButton(withTitle: "Not now")
+                if alert.runModal() == .alertFirstButtonReturn { Account.shared.openUpgrade() }
+            }
         }
     }
 
@@ -169,7 +178,8 @@ struct PopupStylePreview: NSViewRepresentable {
         config.userContentController.add(context.coordinator, name: "fc")
         let w = PanelWebView(frame: .zero, configuration: config)
         w.setValue(false, forKey: "drawsBackground")
-        w.loadHTMLString(PanelHTML.page(mode: "preview", buddy: settings.popupStyle), baseURL: nil)
+        w.loadHTMLString(PanelHTML.page(mode: "preview", buddy: Account.shared.allowedStyle(settings.popupStyle),
+                                        locked: Account.shared.lockedStyles), baseURL: nil)
         return w
     }
 
@@ -182,6 +192,7 @@ struct PopupStylePreview: NSViewRepresentable {
 
 struct PopupStyleView: View {
     @ObservedObject var settings = AppSettings.shared
+    @ObservedObject var account = Account.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -189,6 +200,7 @@ struct PopupStyleView: View {
             Text("Make the pop-up yours. Buddies walk along the top; worlds live inside. They react while it listens, works and finishes, and say hi when you click them.")
                 .font(.system(size: 14)).foregroundColor(Color(hex: 0x5E5E6A)).fixedSize(horizontal: false, vertical: true)
             PopupStylePreview()
+                .id(account.isPro)
                 .frame(height: 620)
                 .background(RoundedRectangle(cornerRadius: 16).fill(Theme.rail))
                 .overlay(RoundedRectangle(cornerRadius: 16).stroke(Theme.hairline))

@@ -140,6 +140,15 @@ enum SelfTest {
         check(!page.contains("__MODE__") && !page.contains("__BUDDY__"), "pop-up page filled in")
         check(JSONSerialization.isValidJSONObject(["phase": "working", "steps": [["text": "a", "state": "done"]], "level": 0.5]), "pop-up state is JSON")
 
+        // Plans
+        let soon = Date().addingTimeInterval(9 * 86400 - 60)
+        check(Account.summary(plan: .trial, used: 0, limit: nil, trialEndsAt: soon, serverEnabled: true) == "Pro trial: 9 days left", "trial summary")
+        check(Account.summary(plan: .free, used: 4, limit: 15, trialEndsAt: nil, serverEnabled: true) == "11 of 15 free AI tasks left this week", "free summary")
+        check(Account.summary(plan: .pro, used: 99, limit: nil, trialEndsAt: nil, serverEnabled: true).hasPrefix("Pro"), "pro summary")
+        check(Account.styleAllowed("kitty", pro: false) && !Account.styleAllowed("dragon", pro: false) && Account.styleAllowed("dragon", pro: true), "free styles")
+        check(Account.hash("a").count == 64, "device id is a hash")
+        check(PanelHTML.page(mode: "preview", buddy: "galaxy", locked: ["dragon"]).contains("[\"dragon\"]"), "locked styles reach the picker")
+
         // Hotkey settings round-trip
         let spec = HotKeySpec(kind: .key, keyCode: 96, modifiers: 0, label: "F5")
         let back = try? JSONDecoder().decode(HotKeySpec.self, from: JSONEncoder().encode(spec))

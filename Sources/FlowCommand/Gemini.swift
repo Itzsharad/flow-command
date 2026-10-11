@@ -5,12 +5,23 @@ import Foundation
 struct GeminiClient {
     var apiKey: String
     var model: String
+    /// Either Google directly (your own key) or Flow Command's usage server (included AI).
+    var url: URL = GeminiClient.endpoint
+    var extraHeaders: [String: String] = [:]
+
+    /// The included AI brain: goes through Flow Command's server, which counts tasks and holds the key.
+    static func flowAI(task: String) -> GeminiClient? {
+        guard let base = Account.serverURL else { return nil }
+        return GeminiClient(apiKey: "", model: AppSettings.shared.geminiModel, url: base.appendingPathComponent("v1/ai"),
+                            extraHeaders: ["X-FC-Device": Account.shared.deviceID, "X-FC-Task": task])
+    }
 
     static let endpoint = URL(string: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions")!
 
     enum GeminiError: LocalizedError {
         case http(Int, String)
         case badReply
+        case limit(String)
         var errorDescription: String? {
             switch self {
             case .http(let code, let msg):
@@ -19,20 +30,30 @@ struct GeminiClient {
                 if code == 404 { return "That Gemini model isn't available on your key. Pick another in Settings." }
                 return "AI error \(code): \(msg)"
             case .badReply: return "The AI's reply didn't make sense. Try saying it a different way."
+            case .limit(let m): return m
             }
         }
     }
 
     private func request(_ body: [String: Any], timeout: TimeInterval = 60) async throws -> [String: Any] {
-        var req = URLRequest(url: GeminiClient.endpoint)
+        var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.timeoutInterval = timeout
-        req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        if !apiKey.isEmpty { req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization") }
+        for (k, v) in extraHeaders { req.setValue(v, forHTTPHeaderField: k) }
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
         let (data, resp) = try await URLSession.shared.data(for: req)
-        let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        let http = resp as? HTTPURLResponse
+        let code = http?.statusCode ?? 0
         let json = try? JSONSerialization.jsonObject(with: data)
+        if !extraHeaders.isEmpty, let h = http { Account.shared.update(from: h) }
+        if !extraHeaders.isEmpty, code != 200 {
+            // Flow Command's server explains itself in plain words
+            let msg = GeminiClient.errorMessage(json)
+            if code == 402 { throw GeminiError.limit(msg) }
+            throw GeminiError.limit(msg == "unknown" ? "The AI had a problem. Try again." : msg)
+        }
         guard code == 200, let obj = json as? [String: Any] else {
             throw GeminiError.http(code, GeminiClient.errorMessage(json))
         }

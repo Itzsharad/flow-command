@@ -1,0 +1,15 @@
+name = "flowcommand-api"
+main = "src/index.js"
+compatibility_date = "2026-06-01"
+workers_dev = true
+
+[vars]
+MODEL = "gemini-3.8-flash"
+FREE_WEEKLY = "15"
+TRIAL_DAYS = "14"
+# LS_STORE_ID = ""   # your Lemon Squeezy store id (only licenses from your store are accepted)
+
+[[d1_databases]]
+binding = "DB"
+database_name = "flowcommand"
+database_id = "__DATABASE_ID__"

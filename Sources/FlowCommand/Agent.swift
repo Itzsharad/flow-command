@@ -26,13 +26,14 @@ final class Agent: ObservableObject {
 
     /// A one-click fix offered on the panel when something is missing.
     enum Fix: Equatable {
-        case screen, brainKey, control, browser
+        case screen, brainKey, control, browser, upgrade
         var title: String {
             switch self {
             case .screen: return "Allow screen access"
             case .brainKey: return "Set up the free AI brain"
             case .control: return "Allow click and type"
             case .browser: return "Make Chrome instant"
+            case .upgrade: return "Upgrade to Pro"
             }
         }
         func perform() {
@@ -41,6 +42,7 @@ final class Agent: ObservableObject {
             case .brainKey: AppDelegate.shared?.showMain()
             case .control: Permissions.requestControl(); Permissions.open(.accessibility)
             case .browser: Task { @MainActor in _ = await Browser.setUp(AppSettings.shared.preferredBrowser ?? "Google Chrome") }
+            case .upgrade: Account.shared.openUpgrade()
             }
         }
     }
@@ -57,6 +59,9 @@ final class Agent: ObservableObject {
     private var needsReset = false
     /// A tip shown when the task finishes (e.g. "Make Chrome instant" after a slow screenshot run).
     private var pendingTip: Fix?
+    /// One id per instruction, so the usage server counts it as one task however many steps it takes.
+    private var taskID = UUID().uuidString
+    private var usedAI = false
     static let maxSteps = 40
     static let needsBrain = "__needs_brain__"
 
@@ -74,6 +79,8 @@ final class Agent: ObservableObject {
         question = ""
         fix = nil
         pendingTip = nil
+        taskID = UUID().uuidString
+        usedAI = false
         phase = .working
         startedAt = Date()
         task = Task.detached(priority: .userInitiated) { [weak self] in
@@ -129,6 +136,13 @@ final class Agent: ObservableObject {
     private func setStatus(_ id: Int, _ s: String) { ui(id) { self.status = s } }
 
     private func finish(_ id: Int, ok: Bool, _ message: String, fix: Fix? = nil) {
+        var message = message
+        var fix = fix
+        let acct = Account.shared
+        if usedAI, Account.serverEnabled, acct.plan == .free, let left = acct.left, left <= 3 {
+            message += left == 0 ? " That was your last free AI task this week." : " (\(left) free AI task\(left == 1 ? "" : "s") left this week.)"
+            if fix == nil { fix = .upgrade }
+        }
         ui(id) {
             if let i = self.steps.lastIndex(where: { $0.state == .current }) { self.steps[i].state = ok ? .done : .failed }
             self.phase = ok ? .done : .failed
@@ -156,7 +170,8 @@ final class Agent: ObservableObject {
 
     private func run(_ text: String, id: Int) async {
         // 1. Your saved routines ("morning setup")
-        if let routine = Routine.match(text, in: settings.routines) {
+        let routines = Account.shared.isPro ? settings.routines : Array(settings.routines.prefix(Account.freeRoutines))
+        if let routine = Routine.match(text, in: routines) {
             addStep(id, "Routine: \(routine.phrase)")
             if let chain = LocalIntents.parseChain(routine.steps) {
                 await runLocalChain(chain, goal: routine.steps, id: id)
@@ -185,13 +200,22 @@ final class Agent: ObservableObject {
         }
         let claudeKey = settings.hasAPIKey ? (settings.apiKey ?? "") : ""
         let geminiKey = settings.hasGeminiKey ? (settings.geminiKey ?? "") : ""
-        if settings.brain == "claude", !claudeKey.isEmpty {
+        let flowAI = GeminiClient.flowAI(task: taskID)
+        if flowAI != nil, Account.shared.outOfTasks, !(settings.brain == "claude" && !claudeKey.isEmpty && Account.shared.isPro) {
+            await Account.shared.refresh()
+            if Account.shared.outOfTasks {
+                finish(id, ok: false, "You've used this week's \(Account.shared.limit ?? Account.freeWeekly) free AI tasks. Instant commands still work. Upgrade to Pro for unlimited, or wait until Monday.", fix: .upgrade)
+                return
+            }
+        }
+        if settings.brain == "claude", !claudeKey.isEmpty, Account.shared.isPro {
             guard await ensureScreen(id) else { return }
             await runClaude(text, key: claudeKey, id: id)
-        } else if !geminiKey.isEmpty {
+        } else if flowAI != nil || !geminiKey.isEmpty {
             // Fast path first: ~1 second, text only. Most instructions never need a screenshot.
             setStatus(id, "Understanding…")
-            let client = GeminiClient(apiKey: geminiKey, model: settings.geminiModel)
+            usedAI = true
+            let client = flowAI ?? GeminiClient(apiKey: geminiKey, model: settings.geminiModel)
             if allowPlan, let steps = try? await client.plan(text), let intents = GeminiClient.localIntents(from: steps) {
                 if Task.isCancelled { return }
                 await runLocalChain(intents, goal: text, id: id)
@@ -211,7 +235,7 @@ final class Agent: ObservableObject {
             }
             if Task.isCancelled { return }
             guard await ensureScreen(id) else { return }
-            await runGemini(context, key: geminiKey, id: id)
+            await runGemini(context, client: client, id: id)
         } else if !claudeKey.isEmpty {
             guard await ensureScreen(id) else { return }
             await runClaude(text, key: claudeKey, id: id)
@@ -383,7 +407,7 @@ final class Agent: ObservableObject {
             let action: [String: Any]
             do { action = try await client.nextPageAction(system: pagePrompt(), text: prompt) } catch {
                 if Task.isCancelled { return .handled }
-                finish(id, ok: false, error.localizedDescription)
+                aiFailed(id, error)
                 return .handled
             }
             if Task.isCancelled { return .handled }
@@ -517,10 +541,16 @@ final class Agent: ObservableObject {
         return p
     }
 
+    /// An AI call failed: out of free tasks shows the upgrade button.
+    private func aiFailed(_ id: Int, _ error: Error) {
+        let msg = error.localizedDescription
+        let isLimit = msg.contains("free AI tasks")
+        finish(id, ok: false, msg, fix: isLimit ? .upgrade : nil)
+    }
+
     static func num(_ v: Any?) -> Double? { (v as? NSNumber)?.doubleValue ?? (v as? String).flatMap(Double.init) }
 
-    private func runGemini(_ text: String, key: String, id: Int) async {
-        let client = GeminiClient(apiKey: key, model: settings.geminiModel)
+    private func runGemini(_ text: String, client: GeminiClient, id: Int) async {
         var log: [String] = []
         var lastResult = "nothing done yet"
         for _ in 0..<30 {
@@ -537,7 +567,7 @@ final class Agent: ObservableObject {
             let action: [String: Any]
             do { action = try await client.nextAction(system: geminiPrompt(), text: prompt, jpeg: shot) } catch {
                 if Task.isCancelled { return }
-                finish(id, ok: false, error.localizedDescription)
+                aiFailed(id, error)
                 return
             }
             if Task.isCancelled { return }

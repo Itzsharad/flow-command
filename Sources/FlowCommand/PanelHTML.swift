@@ -24,8 +24,10 @@ enum PanelHTML {
         ("candy", "world", "Cloud Nine"),
     ]
 
-    static func page(mode: String, buddy: String) -> String {
-        template.replacingOccurrences(of: "__MODE__", with: mode).replacingOccurrences(of: "__BUDDY__", with: buddy)
+    static func page(mode: String, buddy: String, locked: [String] = []) -> String {
+        let list = "[" + locked.map { "\"" + $0 + "\"" }.joined(separator: ",") + "]"
+        return template.replacingOccurrences(of: "__MODE__", with: mode).replacingOccurrences(of: "__BUDDY__", with: buddy)
+            .replacingOccurrences(of: "__LOCKED__", with: list)
     }
 
     static let template = #"""
@@ -289,6 +291,7 @@ html,body{margin:0;padding:0;background:transparent;overflow:hidden;-webkit-user
 #fc-lp .picker-top{display:flex;justify-content:space-between;align-items:center}
 #fc-lp .picker-label{font-size:13px;font-weight:600;color:var(--faint)}
 #fc-lp .bchips{min-height:0}
+#fc-lp .bchip .lock{font-size:10px;font-weight:700;color:#fff;background:linear-gradient(90deg,#5B3DF5,#C13584);border-radius:6px;padding:2px 5px;margin-left:2px}
 @keyframes fcspin{to{transform:rotate(360deg)}}
 </style></head><body>
 <div id="fc-lp">
@@ -493,6 +496,7 @@ html,body{margin:0;padding:0;background:transparent;overflow:hidden;-webkit-user
   var scene = document.createElement('div'); scene.className = 'scene'; panel.insertBefore(scene, panel.firstChild);
   var current = '';
   var MODE = '__MODE__';
+  var LOCKED = __LOCKED__;
 
   function actor() { return BUDDIES[current] && BUDDIES[current].g === 'world' ? scene.querySelector('.resident') : track.querySelector('.buddy'); }
   function sparkle(n) {
@@ -629,7 +633,9 @@ html,body{margin:0;padding:0;background:transparent;overflow:hidden;-webkit-user
       b.type = 'button'; b.className = 'bchip'; b.setAttribute('data-b', key); b.setAttribute('data-g', B.g);
       b.innerHTML = (B.g === 'world' ? '<span class="mini wtile" style="background:' + B.tile + '">' : '<span class="mini">') + B.svg + '</span><span></span>';
       b.lastChild.textContent = B.name;
-      b.addEventListener('click', function () { setBuddy(key, true); post({ action: 'buddy', key: key }); });
+      var locked = LOCKED.indexOf(key) >= 0;
+      if (locked) { b.classList.add('locked'); var lk = document.createElement('span'); lk.className = 'lock'; lk.textContent = 'PRO'; b.appendChild(lk); }
+      b.addEventListener('click', function () { setBuddy(key, true); post({ action: locked ? 'locked' : 'buddy', key: key }); });
       chips.appendChild(b);
     });
     $$('.ptabs button').forEach(function (t) { t.addEventListener('click', function () { group(t.getAttribute('data-g')); }); });

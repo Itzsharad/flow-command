@@ -115,6 +115,7 @@ struct HistoryView: View {
 
 struct RoutinesView: View {
     @ObservedObject var settings = AppSettings.shared
+    @ObservedObject var account = Account.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -143,7 +144,14 @@ struct RoutinesView: View {
                 }
             }
             .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.hairline))
-            Button("+ Add a routine") { settings.routines.append(Routine(phrase: "", steps: "")) }
+            if account.isPro || settings.routines.count < Account.freeRoutines {
+                Button("+ Add a routine") { settings.routines.append(Routine(phrase: "", steps: "")) }
+            } else {
+                HStack(spacing: 10) {
+                    Text("Free includes \(Account.freeRoutines) routines. Pro gives you unlimited.").font(.system(size: 13)).foregroundColor(Theme.muted)
+                    Button("Upgrade to Pro") { account.openUpgrade() }
+                }
+            }
             Text("Tip: routines with simple steps run instantly and free. Steps like “click New chat” work instantly in Chrome once it's made instant in Settings › Websites.")
                 .font(.system(size: 13)).foregroundColor(Theme.muted).fixedSize(horizontal: false, vertical: true)
         }
@@ -159,6 +167,10 @@ struct SettingsView: View {
     @State private var tick = 0
     @State private var loginOn = SMAppService.mainApp.status == .enabled
     @ObservedObject private var whisper = Transcriber.shared
+    @ObservedObject private var account = Account.shared
+    @State private var licenseDraft = ""
+    @State private var licenseMessage: String?
+    @State private var activating = false
     @State private var browserMessage: String?
     @State private var settingUpBrowser = false
     private let timer = Timer.publish(every: 2, on: .main, in: .common).autoconnect()
@@ -166,6 +178,8 @@ struct SettingsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             Text("Settings").font(.system(size: 26, weight: .semibold))
+
+            if Account.serverEnabled { planSection }
 
             section("Waking it up") {
                 row("Wake phrase") {
@@ -275,7 +289,26 @@ struct SettingsView: View {
                 Text("Simple commands and chains (“open Chrome, go to claude.ai, type hello and press enter”) always run instantly on your Mac, free. The AI brain is only used for tasks that need to look at the screen.")
                     .font(.system(size: 13)).foregroundColor(Theme.muted).fixedSize(horizontal: false, vertical: true)
                 row("Private mode (no AI, nothing leaves this Mac)") { Toggle44(on: $settings.privateMode) }
-                if !settings.privateMode {
+                if !settings.privateMode && Account.serverEnabled {
+                    HStack(spacing: 10) {
+                        Image(systemName: "checkmark.seal.fill").foregroundColor(Theme.success)
+                        Text("Flow Command AI is included. Nothing to set up.").font(.system(size: 14))
+                    }
+                    if account.isPro {
+                        DisclosureGroup("Advanced: use your own Claude key instead") {
+                            VStack(alignment: .leading, spacing: 10) {
+                                Toggle("Use Claude for AI tasks", isOn: Binding(get: { settings.brain == "claude" }, set: { settings.brain = $0 ? "claude" : "gemini" }))
+                                keyRow(saved: settings.hasAPIKey, placeholder: "Anthropic API key (sk-ant-…)") { key in
+                                    let err = await ClaudeClient.verify(key: key, model: settings.model)
+                                    if err == nil { await MainActor.run { settings.apiKey = key } }
+                                    return err
+                                } remove: { settings.apiKey = nil }
+                                if let m = keyMessage { Text(m).font(.system(size: 12)).foregroundColor(m.hasPrefix("✓") ? Theme.success : Theme.danger) }
+                            }.padding(.top, 8)
+                        }.font(.system(size: 13))
+                    }
+                }
+                if !settings.privateMode && !Account.serverEnabled {
                     Picker("", selection: $settings.brain) {
                         Text("Free — Google Gemini").tag("gemini")
                         Text("Claude — paid, most capable").tag("claude")
@@ -344,6 +377,52 @@ struct SettingsView: View {
         .onChange(of: settings.whisperEnabled) { on in if on { Transcriber.shared.prepare() } }
     }
 
+    private var planSection: some View {
+        section("Your plan") {
+            HStack(spacing: 10) {
+                Image(systemName: account.plan == .pro ? "crown.fill" : "sparkles").foregroundColor(Theme.accent)
+                Text(account.summary).font(.system(size: 15, weight: .semibold))
+                Spacer()
+                if account.plan != .pro {
+                    Button("Upgrade to Pro") { account.openUpgrade() }.buttonStyle(.borderedProminent).tint(Theme.accent)
+                }
+            }
+            if account.plan == .free, let l = account.limit {
+                ProgressView(value: Double(min(account.used, l)), total: Double(l)).tint((account.left ?? 0) <= 3 ? Theme.warn : Theme.accent)
+                Text("Resets every Monday. Instant commands like “open Chrome and go to claude.ai” are always free and unlimited.")
+                    .font(.system(size: 12)).foregroundColor(Theme.faint)
+            }
+            if account.plan == .trial {
+                Text("You have everything in Pro during your trial. After it, Free gives you \(Account.freeWeekly) AI tasks a week, \(Account.freeRoutines) routines and 4 buddies and worlds.")
+                    .font(.system(size: 12)).foregroundColor(Theme.faint).fixedSize(horizontal: false, vertical: true)
+            }
+            if account.hasLicense {
+                HStack {
+                    Text("License active on this computer.").font(.system(size: 13)).foregroundColor(Theme.muted)
+                    Spacer()
+                    Button("Remove from this computer") { Task { await account.removeLicense() } }
+                }
+            } else {
+                HStack(spacing: 8) {
+                    TextField("Have a license key? Paste it here", text: $licenseDraft).textFieldStyle(.roundedBorder)
+                    Button(activating ? "Checking…" : "Activate") {
+                        activating = true
+                        Task {
+                            let err = await account.activate(licenseDraft)
+                            await MainActor.run {
+                                activating = false
+                                licenseMessage = err ?? "✓ Pro is on. Thank you!"
+                                if err == nil { licenseDraft = "" }
+                            }
+                        }
+                    }.disabled(licenseDraft.isEmpty || activating)
+                }
+                Text("One license works on 2 computers, for example your Mac and your Windows PC.").font(.system(size: 12)).foregroundColor(Theme.faint)
+            }
+            if let m = licenseMessage { Text(m).font(.system(size: 12)).foregroundColor(m.hasPrefix("✓") ? Theme.success : Theme.danger) }
+        }
+    }
+
     static let browsers = ["Google Chrome", "Safari", "Arc", "Brave Browser", "Microsoft Edge", "Firefox", ""]
 
     private func keyRow(saved: Bool, placeholder: String, save: @escaping (String) async -> String?, remove: @escaping () -> Void) -> some View {
@@ -391,6 +470,7 @@ struct SettingsView: View {
 // MARK: - Menu bar
 
 struct MenuBarView: View {
+    @ObservedObject var account = Account.shared
     @ObservedObject var listener = Listener.shared
     @ObservedObject var agent = Agent.shared
     @ObservedObject var settings = AppSettings.shared
@@ -406,6 +486,15 @@ struct MenuBarView: View {
             }
             Text(settings.wakeEnabled ? "Say “\(settings.wakePhrase)”" : "Hold \(settings.holdKey.label) to talk")
                 .font(.system(size: 12)).foregroundColor(.secondary)
+            if Account.serverEnabled {
+                HStack {
+                    Text(account.summary).font(.system(size: 12)).foregroundColor(account.plan == .free && (account.left ?? 1) <= 3 ? Theme.warn : .secondary)
+                    Spacer()
+                    if account.plan == .free || account.plan == .trial {
+                        Button("Upgrade") { account.openUpgrade() }.foregroundColor(Theme.accent).font(.system(size: 12, weight: .semibold))
+                    }
+                }
+            }
             if let p = listener.problem {
                 Text(p).font(.system(size: 12)).foregroundColor(Theme.warn).fixedSize(horizontal: false, vertical: true)
             }

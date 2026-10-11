@@ -1,0 +1,72 @@
+name: Deploy usage server
+
+on:
+  push:
+    branches: [main]
+    paths: ['server/**', '.github/workflows/server.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the three secrets are added
+        id: check
+        env:
+          CF: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          ACC: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          GK: ${{ secrets.GEMINI_KEY }}
+        run: |
+          if [ -z "$CF" ] || [ -z "$ACC" ] || [ -z "$GK" ]; then
+            echo "::warning title=Server not deployed yet::Add CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID and GEMINI_KEY under Settings → Secrets and variables → Actions, then run this workflow again."
+            echo "ready=no" >> $GITHUB_OUTPUT
+          else
+            echo "ready=yes" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Deploy to Cloudflare
+        if: steps.check.outputs.ready == 'yes'
+        working-directory: server
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
+          LS_STORE_ID: ${{ vars.LS_STORE_ID }}
+        run: |
+          set -e
+          npm ci --no-audit --no-fund
+          dbid() { npx wrangler d1 list --json 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(next((x.get('uuid') or x.get('id') for x in d if x.get('name')=='flowcommand'),''))"; }
+          ID=$(dbid)
+          if [ -z "$ID" ]; then npx wrangler d1 create flowcommand; ID=$(dbid); fi
+          if [ -z "$ID" ]; then echo "::error title=Database::Couldn't create the database. Check the API token has D1 Edit permission."; exit 1; fi
+          sed -i "s/__DATABASE_ID__/$ID/" wrangler.toml
+          if [ -n "$LS_STORE_ID" ]; then sed -i "s/^# LS_STORE_ID = \"\".*/LS_STORE_ID = \"$LS_STORE_ID\"/" wrangler.toml; fi
+          npx wrangler d1 execute flowcommand --remote --file schema.sql
+          npx wrangler deploy 2>&1 | tee deploy.log
+          printf '%s' "$GEMINI_KEY" | npx wrangler secret put GEMINI_KEY
+          URL=$(grep -o 'https://[a-zA-Z0-9.-]*workers\.dev' deploy.log | head -1)
+          if [ -z "$URL" ]; then echo "::error title=Deploy::Deployed, but couldn't find the workers.dev address. Turn on the workers.dev subdomain in Cloudflare."; exit 1; fi
+          sleep 5
+          curl -fsS "$URL/" && echo
+          echo "$URL" > ../config/server_url.txt
+          echo "::notice title=Server is live::$URL"
+
+      - name: Save the server address and rebuild the app
+        if: steps.check.outputs.ready == 'yes'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! git diff --quiet config/server_url.txt; then
+            git config user.name "github-actions"
+            git config user.email "github-actions@users.noreply.github.com"
+            git add config/server_url.txt
+            git commit -m "Server address"
+            git push
+            gh workflow run build.yml --ref main
+          fi

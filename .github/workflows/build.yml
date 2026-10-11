@@ -63,6 +63,9 @@ jobs:
           mkdir -p $APP/Contents/MacOS $APP/Contents/Resources
           cp .build/arm64-apple-macosx/release/FlowCommand $APP/Contents/MacOS/FlowCommand
           cp Info.plist $APP/Contents/Info.plist
+          # where the app finds the usage server and the upgrade page (set up once; empty = not yet)
+          /usr/libexec/PlistBuddy -c "Add :FCServerURL string $(tr -d ' \n' < config/server_url.txt 2>/dev/null)" $APP/Contents/Info.plist
+          /usr/libexec/PlistBuddy -c "Add :FCCheckoutURL string $(tr -d ' \n' < config/checkout_url.txt 2>/dev/null)" $APP/Contents/Info.plist
           cp AppIcon.icns $APP/Contents/Resources/AppIcon.icns
           if codesign --force --deep --keychain build.keychain --sign "Flow Command Developer" $APP; then
             echo "Signed with the stable Flow Command certificate"

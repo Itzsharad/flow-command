@@ -6,6 +6,7 @@
   var scene = document.createElement('div'); scene.className = 'scene'; panel.insertBefore(scene, panel.firstChild);
   var current = '';
   var MODE = '__MODE__';
+  var LOCKED = __LOCKED__;
 
   function actor() { return BUDDIES[current] && BUDDIES[current].g === 'world' ? scene.querySelector('.resident') : track.querySelector('.buddy'); }
   function sparkle(n) {
@@ -142,7 +143,9 @@
       b.type = 'button'; b.className = 'bchip'; b.setAttribute('data-b', key); b.setAttribute('data-g', B.g);
       b.innerHTML = (B.g === 'world' ? '<span class="mini wtile" style="background:' + B.tile + '">' : '<span class="mini">') + B.svg + '</span><span></span>';
       b.lastChild.textContent = B.name;
-      b.addEventListener('click', function () { setBuddy(key, true); post({ action: 'buddy', key: key }); });
+      var locked = LOCKED.indexOf(key) >= 0;
+      if (locked) { b.classList.add('locked'); var lk = document.createElement('span'); lk.className = 'lock'; lk.textContent = 'PRO'; b.appendChild(lk); }
+      b.addEventListener('click', function () { setBuddy(key, true); post({ action: locked ? 'locked' : 'buddy', key: key }); });
       chips.appendChild(b);
     });
     $$('.ptabs button').forEach(function (t) { t.addEventListener('click', function () { group(t.getAttribute('data-g')); }); });
