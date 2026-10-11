@@ -14,7 +14,9 @@ final class LivePanelController: NSObject, WKScriptMessageHandler, WKNavigationD
     static let shared = LivePanelController()
     private var panel: NSPanel?
     private var web: PanelWebView?
+    private var native: NSHostingView<AnyView>?
     private var ready = false
+    private var webBroken = false
     private var pending = false
     private var size = NSSize(width: 404, height: 260)
     private var bag = Set<AnyCancellable>()
@@ -41,9 +43,13 @@ final class LivePanelController: NSObject, WKScriptMessageHandler, WKNavigationD
         p.hasShadow = false          // the page draws its own soft shadow
         p.hidesOnDeactivate = false
         p.becomesKeyOnlyIfNeeded = true
-        p.contentView = w
+        let n = NSHostingView(rootView: AnyView(NativePanelView().environmentObject(Agent.shared).environmentObject(Listener.shared)))
+        p.contentView = n
         panel = p
         web = w
+        native = n
+        // the web page must be in a window to load; keep it attached (hidden) until it's ready
+        n.addSubview(w); w.isHidden = true
 
         Agent.shared.objectWillChange.merge(with: Listener.shared.objectWillChange, AppSettings.shared.objectWillChange, Account.shared.objectWillChange)
             .receive(on: RunLoop.main)
@@ -71,6 +77,7 @@ final class LivePanelController: NSObject, WKScriptMessageHandler, WKNavigationD
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         Log.write("pop-up process ended; reloading")
         ready = false
+        scheduleRender()
         webView.loadHTMLString(PanelHTML.page(mode: "live", buddy: Account.shared.allowedStyle(AppSettings.shared.popupStyle)), baseURL: nil)
     }
 
@@ -89,12 +96,29 @@ final class LivePanelController: NSObject, WKScriptMessageHandler, WKNavigationD
         return agent.phase != .idle || l.mode == .awake || l.mode == .holding || l.understanding
     }
 
+    /// The animated pop-up is used only when it has loaded and a buddy or world is picked; otherwise the native one.
+    private var useWeb: Bool {
+        ready && !webBroken && Account.shared.allowedStyle(AppSettings.shared.popupStyle) != "classic"
+    }
+
     private func render() {
-        guard let p = panel, let w = web else { return }
+        guard let p = panel, let w = web, let n = native else { return }
         guard shouldShow else { p.orderOut(nil); lastPhase = Agent.shared.phase; return }
-        if ready, let data = try? JSONSerialization.data(withJSONObject: LivePanelController.state(doneTitle: &doneTitle, lastPhase: &lastPhase)),
-           let json = String(data: data, encoding: .utf8) {
-            w.evaluateJavaScript("window.fc && fc.render(\(json))", completionHandler: nil)
+        if useWeb {
+            if p.contentView !== w { w.removeFromSuperview(); w.isHidden = false; p.contentView = w; p.hasShadow = false }
+            if let data = try? JSONSerialization.data(withJSONObject: LivePanelController.state(doneTitle: &doneTitle, lastPhase: &lastPhase)),
+               let json = String(data: data, encoding: .utf8) {
+                w.evaluateJavaScript("window.fc && fc.render(\(json))") { [weak self] _, error in
+                    if let error = error {
+                        Log.write("pop-up script error: \(error.localizedDescription); using the plain pop-up")
+                        self?.webBroken = true
+                        self?.scheduleRender()
+                    }
+                }
+            }
+        } else {
+            if p.contentView !== n { p.contentView = n; n.addSubview(w); w.isHidden = true; p.hasShadow = true }
+            _ = LivePanelController.state(doneTitle: &doneTitle, lastPhase: &lastPhase)
         }
         place()
         if !p.isVisible { p.orderFrontRegardless() }
@@ -103,8 +127,14 @@ final class LivePanelController: NSObject, WKScriptMessageHandler, WKNavigationD
     private func place() {
         guard let p = panel else { return }
         let screen = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
-        // the page has transparent margins for its shadow and for the buddy walking on top
-        let frame = NSRect(x: screen.maxX - size.width - 2, y: screen.minY + 2, width: size.width, height: size.height)
+        let frame: NSRect
+        if useWeb {
+            // the page has transparent margins for its shadow and for the buddy walking on top
+            frame = NSRect(x: screen.maxX - size.width - 2, y: screen.minY + 2, width: size.width, height: size.height)
+        } else {
+            let s = native?.fittingSize ?? NSSize(width: 380, height: 120)
+            frame = NSRect(x: screen.maxX - s.width - 24, y: screen.minY + 24, width: s.width, height: s.height)
+        }
         if p.frame != frame { p.setFrame(frame, display: true) }
     }
 
@@ -153,7 +183,7 @@ final class LivePanelController: NSObject, WKScriptMessageHandler, WKNavigationD
         case "size":
             if let w = (body["w"] as? NSNumber)?.doubleValue, let h = (body["h"] as? NSNumber)?.doubleValue, w > 0, h > 0 {
                 let new = NSSize(width: ceil(w), height: ceil(h))
-                if new != size { size = new; place() }
+                if new != size { size = new; if useWeb { place() } }
             }
         case "stop": agent.stop()
         case "yes": agent.respond(true)

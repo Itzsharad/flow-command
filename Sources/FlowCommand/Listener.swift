@@ -33,6 +33,8 @@ final class Listener: ObservableObject {
     var onWake: (() -> Void)?
     var onSleep: (() -> Void)?
     var onStopWord: (() -> Void)?
+    /// Called when you try to talk but it can't listen yet (e.g. microphone permission is off).
+    var onNotReady: ((String) -> Void)?
     /// While the agent is waiting for "yes"/"no"/"continue" it intercepts what you say.
     var replyInterceptor: ((String) -> Bool)?
     var isBusy: () -> Bool = { false }
@@ -84,6 +86,31 @@ final class Listener: ObservableObject {
         reconfigure()
     }
 
+    /// Starts listening, asking macOS for the microphone and speech permissions first if needed.
+    func ensurePermissionsAndStart() {
+        let mic = AVCaptureDevice.authorizationStatus(for: .audio)
+        let speech = SFSpeechRecognizer.authorizationStatus()
+        Log.write("permissions · mic=\(mic.rawValue) speech=\(speech.rawValue)")
+        if mic == .authorized && speech == .authorized { problem = nil; start(); return }
+        if mic == .notDetermined || speech == .notDetermined {
+            Permissions.requestMicrophoneAndSpeech { [weak self] ok in
+                Log.write("permission answer: \(ok)")
+                guard let self = self else { return }
+                if ok { self.problem = nil; self.start() } else { self.problem = Listener.permissionHelp }
+            }
+            return
+        }
+        problem = Listener.permissionHelp
+    }
+
+    static let permissionHelp = "Flow Command can't use the microphone. Open System Settings › Privacy & Security, and turn on FlowCommand under both Microphone and Speech Recognition. Then quit and reopen Flow Command."
+
+    private func notReady() {
+        let why = problem ?? (Permissions.microphone && Permissions.speech ? "The microphone didn't start." : Listener.permissionHelp)
+        Log.write("can't listen: \(why)")
+        onNotReady?(why)
+    }
+
     func shutdown() {
         ticker?.invalidate(); ticker = nil
         stopEngine()
@@ -109,7 +136,7 @@ final class Listener: ObservableObject {
     // MARK: Waking and sleeping
 
     func wakeNow() {
-        guard started else { return }
+        guard started else { notReady(); return }
         if !engineRunning { startEngine() }
         carry = ""; live = ""
         audioMark = Transcriber.shared.mark(secondsBack: 0.3)
@@ -138,7 +165,8 @@ final class Listener: ObservableObject {
 
     func holdBegan() {
         Log.write("hold began · started=\(started) mode=\(mode)")
-        guard started, mode != .holding else { return }
+        guard started else { notReady(); return }
+        guard mode != .holding else { return }
         if !engineRunning { startEngine() }
         carry = ""; live = ""
         audioMark = Transcriber.shared.mark(secondsBack: 0.3)

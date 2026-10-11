@@ -90,7 +90,7 @@ final class Transcriber: ObservableObject {
     // MARK: Audio (called from the microphone thread)
 
     func feed(_ buffer: AVAudioPCMBuffer) {
-        guard kit != nil || preparing else { return }
+        guard kit != nil else { return }   // only once Whisper is ready (keeps the microphone path light)
         if sourceFormat != buffer.format {
             sourceFormat = buffer.format
             converter = AVAudioConverter(from: buffer.format, to: target)

@@ -104,6 +104,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             listener.onStopWord = { agent.stop() }
             listener.isBusy = { agent.isBusy }
             listener.onSleep = { agent.resetConversation() }
+            listener.onNotReady = { [weak self] why in self?.showCantHear(why) }
             // Your talk key is also the off switch:
             //  • pressed while a task runs → stops it and goes to sleep
             //  • pressed while awake (woken by voice) → goes to sleep right away
@@ -127,11 +128,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if agent.isBusy { agent.stop() } else if listener.mode == .awake { listener.sleep() }
             }
         }
-        listener.start()
+        listener.ensurePermissionsAndStart()
         Log.write("services start · control=\(Permissions.control) holdKey=\(AppSettings.shared.holdKeyEnabled) \(AppSettings.shared.holdKey.label)")
         if Permissions.control { keys.start() }
         Transcriber.shared.prepare()   // downloads the accent-accurate speech model once, in the background
         Task { await Account.shared.refresh() }
+    }
+
+    private var cantHearShowing = false
+    /// A clear message instead of silence when it can't listen.
+    func showCantHear(_ why: String) {
+        guard !cantHearShowing else { return }
+        cantHearShowing = true
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = "Flow Command can't hear you yet"
+        alert.informativeText = why
+        let needsPermission = !(Permissions.microphone && Permissions.speech)
+        alert.addButton(withTitle: needsPermission ? "Fix it" : "Try again")
+        alert.addButton(withTitle: "Close")
+        let r = alert.runModal()
+        cantHearShowing = false
+        guard r == .alertFirstButtonReturn else { return }
+        if AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined || SFSpeechRecognizer.authorizationStatus() == .notDetermined {
+            Listener.shared.ensurePermissionsAndStart()
+        } else if needsPermission {
+            Permissions.open(AVCaptureDevice.authorizationStatus(for: .audio) == .authorized ? .speech : .microphone)
+        } else {
+            Listener.shared.shutdown()
+            Listener.shared.ensurePermissionsAndStart()
+        }
     }
 
     func showOnboarding() {
