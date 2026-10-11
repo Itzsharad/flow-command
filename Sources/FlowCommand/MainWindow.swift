@@ -3,7 +3,7 @@ import ServiceManagement
 import SwiftUI
 
 struct MainWindowView: View {
-    enum Tab: String { case history = "History", routines = "Routines", settings = "Settings" }
+    enum Tab: String { case history = "History", routines = "Routines", popup = "Pop-up style", settings = "Settings" }
     @State var tab: Tab = .settings
     @ObservedObject var listener = Listener.shared
 
@@ -17,6 +17,7 @@ struct MainWindowView: View {
                 }.padding(.leading, 8).padding(.bottom, 18)
                 navItem(.history, "clock")
                 navItem(.routines, "bolt")
+                navItem(.popup, "sparkles")
                 navItem(.settings, "slider.horizontal.3")
                 Spacer()
                 VStack(alignment: .leading, spacing: 8) {
@@ -41,6 +42,7 @@ struct MainWindowView: View {
                     switch tab {
                     case .history: HistoryView()
                     case .routines: RoutinesView()
+                    case .popup: PopupStyleView()
                     case .settings: SettingsView()
                     }
                 }

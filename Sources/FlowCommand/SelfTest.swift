@@ -131,6 +131,15 @@ enum SelfTest {
         check(Listener.dropWakePhrase("Flow Command, activate. Open Chrome", phrase: "Flow Command, activate") == "Open Chrome", "drop wake phrase")
         check(Listener.dropWakePhrase("Open Chrome", phrase: "Flow Command, activate") == "Open Chrome", "no wake phrase to drop")
 
+        // Pop-up styles
+        check(PanelHTML.styles.count >= 20, "all buddies and worlds listed")
+        check(PanelHTML.styles.contains { $0.key == "galaxy" && $0.group == "world" }, "galaxy is a world")
+        check(PanelHTML.styles.contains { $0.key == "kitty" && $0.group == "walk" }, "kitty is a buddy")
+        let page = PanelHTML.page(mode: "live", buddy: "kitty")
+        check(page.contains("fc.render") || page.contains("render: render"), "pop-up page has its renderer")
+        check(!page.contains("__MODE__") && !page.contains("__BUDDY__"), "pop-up page filled in")
+        check(JSONSerialization.isValidJSONObject(["phase": "working", "steps": [["text": "a", "state": "done"]], "level": 0.5]), "pop-up state is JSON")
+
         // Hotkey settings round-trip
         let spec = HotKeySpec(kind: .key, keyCode: 96, modifiers: 0, label: "F5")
         let back = try? JSONDecoder().decode(HotKeySpec.self, from: JSONEncoder().encode(spec))

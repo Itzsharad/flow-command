@@ -321,6 +321,7 @@ struct OnboardingView: View {
                 tip("Instant & free", "“Open Chrome, go to claude.ai, type hello and press enter”")
                 tip("Bigger tasks", "Add the free AI brain in Settings when you want it")
                 tip("Stop anytime", "Say “stop” or press Esc")
+                tip("Make it yours", "Pick a buddy or world for your pop-up in Flow Command › Pop-up style")
             }.frame(maxWidth: 600).padding(.bottom, 16)
             boosts.frame(maxWidth: 600).padding(.bottom, 16)
             Toggle("Open Flow Command when I start my Mac", isOn: $startAtLogin).toggleStyle(.checkbox).font(.system(size: 15))

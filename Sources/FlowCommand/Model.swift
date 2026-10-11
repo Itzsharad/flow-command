@@ -104,6 +104,8 @@ final class AppSettings: ObservableObject {
     @Published var whisperEnabled: Bool { didSet { d.set(whisperEnabled, forKey: "whisperEnabled") } }
     /// Saved voice shortcuts: say the phrase, the steps run.
     @Published var routines: [Routine] { didSet { save(routines, "routines") } }
+    /// The pop-up's buddy or world (see PanelHTML.styles).
+    @Published var popupStyle: String { didSet { d.set(popupStyle, forKey: "popupStyle") } }
     @Published var hasAPIKey: Bool = false
     @Published var hasGeminiKey: Bool = false
 
@@ -115,7 +117,7 @@ final class AppSettings: ObservableObject {
             "askBeforeDelete": true, "askBeforePost": true, "sounds": true,
             "model": "claude-sonnet-5-5", "brain": "gemini", "geminiModel": "gemini-3.8-flash",
             "browser": Computer.findApp(named: "google chrome") != nil ? "Google Chrome" : "",
-            "whisperEnabled": true,
+            "whisperEnabled": true, "popupStyle": "galaxy",
         ])
         onboarded = d.bool(forKey: "onboarded")
         onboardingStep = d.integer(forKey: "setupStep")
@@ -139,6 +141,7 @@ final class AppSettings: ObservableObject {
         geminiModel = d.string(forKey: "geminiModel") ?? "gemini-3.8-flash"
         browser = d.string(forKey: "browser") ?? ""
         whisperEnabled = d.bool(forKey: "whisperEnabled")
+        popupStyle = d.string(forKey: "popupStyle") ?? "galaxy"
         if let data = d.data(forKey: "routines"), let list = try? JSONDecoder().decode([Routine].self, from: data) {
             routines = list
         } else {
